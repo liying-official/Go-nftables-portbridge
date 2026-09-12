@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "web": {
+    "require_https": true,
+    "port": 9080,
+    "listen_ipv4": "0.0.0.0",
+    "listen_ipv6": "::",
+    "auto_lan_acl": false,
+    "strict_ip_allowlist": true,
+    "allow_insecure_http": false,
+    "whitelist": [
+      "192.0.2.10/32",
+      "2001:db8:1234::10/128"
+    ],
+    "tls_cert_file": "/etc/portbridge-tls/fullchain.pem",
+    "tls_key_file": "/etc/portbridge-tls/privkey.pem",
+    "tls_min_version": "1.3",
+    "dns_servers": [],
+    "admin_token_sha256": ""
+  },
+  "resource_limits": {
+    "max_tcp_connections": 8192,
+    "max_udp_sessions": 16384,
+    "max_udp_memory_bytes": 1073741824
+  },
+  "nftables": {
+    "conntrack_mark": 1346502657,
+    "enable_flowtable": true
+  },
+  "rules": []
+}

@@ -1,0 +1,32 @@
+# Build and release output
+/build/
+/dist/
+/release/
+*.tar.gz
+*.zip
+*.sha256
+
+# Runtime configuration and credentials
+config.json
+admin.token
+*.token
+.env
+.env.*
+!.env.example
+
+# Logs, databases, coverage, and temporary files
+*.log
+*.db
+*.sqlite
+*.sqlite3
+coverage.out
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

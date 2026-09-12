@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "web": {
+    "port": 9080,
+    "listen_ipv4": "127.0.0.1",
+    "listen_ipv6": "::1",
+    "auto_lan_acl": false,
+    "strict_ip_allowlist": false,
+    "allow_insecure_http": false,
+    "whitelist": [],
+    "tls_cert_file": "",
+    "tls_key_file": "",
+    "dns_servers": [
+      "1.1.1.1:53",
+      "[2606:4700:4700::1111]:53"
+    ],
+    "admin_token_sha256": ""
+  },
+  "resource_limits": {
+    "max_tcp_connections": 8192,
+    "max_udp_sessions": 16384,
+    "max_udp_memory_bytes": 1073741824
+  },
+  "nftables": {
+    "conntrack_mark": 1346502657,
+    "enable_flowtable": true
+  },
+  "rules": [
+    {
+      "id": "example-tcp-v6-to-v4",
+      "name": "HTTPS IPv6 转 IPv4",
+      "protocol": "tcp",
+      "data_plane": "nftables",
+      "listen_host": "::",
+      "listen_port": 443,
+      "listen_port_end": 452,
+      "target_host": "192.0.2.20",
+      "target_port": 443,
+      "target_port_end": 452,
+      "enabled": true,
+      "connect_timeout_seconds": 10,
+      "tcp_idle_timeout_seconds": 300,
+      "max_tcp_connections": 2048,
+      "max_tcp_connections_per_source": 256,
+      "udp_idle_timeout_seconds": 60,
+      "max_udp_sessions": 4096,
+      "max_udp_sessions_per_source": 512,
+      "udp_new_sessions_per_second_per_source": 1000,
+      "udp_packets_per_second_per_source": 100000,
+      "udp_workers": 0,
+      "udp_batch_size": 64,
+      "udp_packet_buffer_size": 2048,
+      "udp_listener_buffer_bytes": 4194304,
+      "udp_session_buffer_bytes": 65536,
+      "allow_private_target": false,
+      "target_cidr_allowlist": []
+    }
+  ]
+}
