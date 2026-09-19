@@ -1,8 +1,8 @@
-# Go-nftables-portbridge v2.4.4 — Security policy / 安全说明
+# Go-nftables-portbridge v2.4.9 — Security policy / 安全说明
 
 ## Supported release
 
-Security fixes are prepared for the latest release, currently `v2.4.4`. Reproduce a report against the latest release before submitting it when practical.
+This unsigned v2.4.9 candidate adds bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule\'s flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Service/reboot evidence is environment-specific and documented separately; broader policies and long-run capacity still require their own validation.
 
 ## Reporting a vulnerability
 
@@ -49,13 +49,15 @@ At `info` level, normal startup messages omit rule names and forwarding endpoint
 
 The service needs `CAP_NET_ADMIN` to manage only the `inet portbridge` table and `CAP_NET_BIND_SERVICE` for privileged ports. The table carries an instance-specific owner comment and all forwarding rules use a nonzero instance conntrack mark. PortBridge refuses to overwrite or remove a same-name table with a missing/mismatched marker. The supplied systemd unit removes other capabilities and applies filesystem, process, device, namespace, syscall, file-descriptor, task, CPU, and memory restrictions.
 
-nftables updates are transactions. If replacement fails, PortBridge attempts to remove its owned table to fail closed, and systemd performs another ownership-aware cleanup after service stop. If both operations fail, the runtime keeps a visible error tombstone because stale forwarding may remain. After correcting the nftables problem, use `sudo /usr/local/bin/portbridge --cleanup-nft`; inspect a marker mismatch manually rather than deleting a potentially foreign table.
+nftables admission updates and conntrack retirement are separate operations. Exact tuple/mark/common-zone matching, a persistent owned unhooked journal and visible failure states replace the misleading delete-table-is-fail-closed claim. Unknown ownership is never guessed from a shared mark; old flows may remain when both records and process memory are lost. See the forwarding limits before cleanup or deployment.
 
 ## Forwarding targets and resource exhaustion
 
 Rule targets are untrusted input. Literal addresses and every DNS refresh result are checked against denied local/private/link-local/multicast/unspecified/CGNAT/cloud-metadata ranges. A private target requires both `allow_private_target=true` and a narrow `target_cidr_allowlist`; `/0` target allowlists are rejected. Custom DNS uses conventional plaintext DNS unless the configured local resolver provides its own encrypted upstream, so protect resolver routing and configuration.
 
 Global TCP connection, UDP session and estimated UDP-memory budgets apply to Go proxy paths together with per-rule and per-source limits. UDP source-session and token-bucket rate limits are shared across the rule's SO_REUSEPORT workers, port ranges, IPv4/IPv6 listeners, wildcard fallback and hybrid Go runners. They do not automatically constrain nftables/flowtable traffic; apply required kernel-path limits separately. Token buckets allow bounded bursts rather than fixed-window per-second guarantees. Monitor rejection/drop counters, socket drops, memory, file descriptors and conntrack use.
+
+This candidate uses the existing unsigned source-build path; the following prebuilt-signature policy is unchanged but does not authenticate the candidate.
 
 ## Release integrity
 
@@ -65,7 +67,7 @@ The signing identity is `portbridge-release-v2` and the namespace is `portbridge
 
 ## 中文说明
 
-当前安全维护版本为 `v2.4.4`。疑似漏洞请使用 GitHub 私密漏洞报告 / Security Advisory，不要创建公开 Issue；提交前删除管理员令牌、SSH 凭据、真实 IP/域名、生产配置、TLS 私钥、环境文件和未脱敏抓包。
+当前树是 v2.4.9 未签名源码候选。新增逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除；服务与重启证据属于特定环境并单独记录；更广策略与长时间容量仍需独立验证。
 
 安装与升级后包括回环监听也强制 HTTPS；未配置证书时在启动前生成每台机器独立、有效期十年的 ECDSA P-256 自签证书。安装器与 systemd 双重执行要求，设置 API 拒绝清空证书或启用明文 HTTP。自签证书提供加密但需要核对指纹并建立客户端信任，不能等同于浏览器自动信任。已有有效证书保留，无效证书在预检时报错；导入和替换流程见双语 README。默认仍关闭自动 LAN 识别，远程可使用 SSH 隧道。公网直连必须同时使用云安全组/主机防火墙、原生 TLS 与严格 IP 白名单：先配置证书并重启确认 HTTPS，再从 HTTPS 关闭自动 LAN、加入当前直连地址并启用严格模式。严格模式忽略自动 LAN 和 `--bootstrap-allow`，拒绝 `/0`，只额外保留回环恢复通道；TLS 默认最低 1.2，公网直连可设置 `web.tls_min_version=1.3`（重启生效），私钥必须是非符号链接的常规文件，通常使用 `0600` 或 `0640 root:portbridge`。
 
@@ -77,6 +79,6 @@ PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也�
 
 签名身份为 `portbridge-release-v2`，namespace 为 `portbridge-release`。应先从可信来源核对预期公钥/指纹，再信任包内 signer；私钥备份应离线保存并与发布文件分离。
 
-服务只管理带实例所有权标记与专用 conntrack mark 的 `inet portbridge` 表并需要 `CAP_NET_ADMIN`；同名外部表不会被覆盖或删除。nftables 替换失败时程序会删除自己的受管表以 fail-closed，systemd 停止后还会再次清理；如果两次清理都失败，Web 会保留“旧转发可能仍活动”的错误状态。修复原因后执行 `sudo /usr/local/bin/portbridge --cleanup-nft`，标记不匹配时先人工确认所有权。
+服务只操作真实 owner 验证后的自有表。nft 入口更新与 conntrack 撤销分属不同操作，依据完整 tuple/mark/common zone 定向处理，并用自有无 hook 恢复链及可见错误保存未完成状态。删表不等于撤销；所有权记录与进程内存同时丢失时旧流仍可能活动，不能只按共享 mark 猜测清理。详见转发限制。
 
 转发目标和每次 DNS 刷新都会拒绝未授权的本机/私网/链路本地/多播/未指定/CGNAT/云元数据地址，私网目标必须同时启用 `allow_private_target` 并填写窄范围 `target_cidr_allowlist`。连接、会话、速率和估算内存预算作用于 Go 代理路径；UDP 来源预算在同一逻辑规则的 worker、端口段、地址族、通配 fallback 和 hybrid Go runner 之间共享。速率采用允许受限突发的令牌桶，不是任意固定一秒窗口的严格计数；这些设置不会自动限制 nftables/flowtable 内核转发。预编译安装器固定 Ed25519 公钥和指纹，先拒绝替换、链接或多 key signer，再校验签名清单及源码/二进制。发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`；私钥从不随包分发。

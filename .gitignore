@@ -2,6 +2,14 @@
 /build/
 /dist/
 /release/
+/reports/
+/evidence/
+/outputs/
+/work/
+*.pem
+*.key
+*.p12
+*.pfx
 *.tar.gz
 *.zip
 *.sha256

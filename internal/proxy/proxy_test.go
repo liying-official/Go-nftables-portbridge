@@ -2,11 +2,13 @@ package proxy
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,6 +17,36 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// Only explicit address-family/protocol absence is an environmental skip.
+// Malformed addresses, missing ports, occupied ports and permission failures fail.
+func testListenFailure(t testing.TB, network, address string, err error) {
+	t.Helper()
+	if _, _, parseErr := net.SplitHostPort(address); parseErr != nil {
+		t.Fatalf("invalid test listen address %q: %v", address, parseErr)
+	}
+	if testNetworkUnsupported(err) {
+		t.Skipf("%s is unsupported by this environment: %v", network, err)
+	}
+	t.Fatalf("listen %s %s failed: %v", network, address, err)
+}
+
+func testNetworkUnsupported(err error) bool {
+	return errors.Is(err, syscall.EAFNOSUPPORT) || errors.Is(err, syscall.EPROTONOSUPPORT)
+}
+
+func TestListenFailuresDoNotHideTestErrors(t *testing.T) {
+	for _, err := range []error{&net.AddrError{Err: "missing port in address", Addr: "127.0.0.1"}, syscall.EADDRINUSE, syscall.EACCES, syscall.EINVAL} {
+		if testNetworkUnsupported(err) {
+			t.Fatalf("test/configuration error classified as missing capability: %v", err)
+		}
+	}
+	for _, err := range []error{syscall.EAFNOSUPPORT, &net.OpError{Err: syscall.EPROTONOSUPPORT}} {
+		if !testNetworkUnsupported(err) {
+			t.Fatalf("explicit unsupported network was not recognized: %v", err)
+		}
+	}
 }
 
 func TestInfoLogDoesNotExposeRuleTopology(t *testing.T) {
@@ -45,7 +77,7 @@ func freeTCPPort(t *testing.T, network, address string) int {
 	t.Helper()
 	ln, err := net.Listen(network, address)
 	if err != nil {
-		t.Skipf("network unavailable: %v", err)
+		testListenFailure(t, network, address, err)
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
@@ -55,7 +87,7 @@ func startTCPEcho(t *testing.T, network, address string) (host string, port int,
 	t.Helper()
 	ln, err := net.Listen(network, address)
 	if err != nil {
-		t.Skipf("network unavailable: %v", err)
+		testListenFailure(t, network, address, err)
 	}
 	go func() {
 		for {
@@ -72,7 +104,7 @@ func startTCPEcho(t *testing.T, network, address string) (host string, port int,
 
 func runTCPCase(t *testing.T, listenHost, targetHost string, targetPort int, dialNetwork, dialAddr string) {
 	t.Helper()
-	port := freeTCPPort(t, dialNetwork, dialAddr)
+	port := freeTCPPort(t, dialNetwork, net.JoinHostPort(dialAddr, "0"))
 	rule := config.NormalizeRule(config.Rule{
 		ID: "test", Name: "test", Protocol: "tcp", ListenHost: listenHost, ListenPort: port,
 		TargetHost: targetHost, TargetPort: targetPort, Enabled: true,
@@ -151,7 +183,7 @@ func startUDPEcho(t *testing.T, network, address string) (host string, port int,
 	}
 	conn, err := net.ListenUDP(network, addr)
 	if err != nil {
-		t.Skipf("network unavailable: %v", err)
+		testListenFailure(t, network, address, err)
 	}
 	go func() {
 		buf := make([]byte, 65535)
@@ -175,7 +207,7 @@ func freeUDPPort(t *testing.T, network, address string) int {
 	}
 	c, err := net.ListenUDP(network, addr)
 	if err != nil {
-		t.Skipf("network unavailable: %v", err)
+		testListenFailure(t, network, address, err)
 	}
 	defer c.Close()
 	return c.LocalAddr().(*net.UDPAddr).Port

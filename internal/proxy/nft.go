@@ -1,8 +1,6 @@
 package proxy
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -10,14 +8,12 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"portbridge/internal/config"
 )
@@ -26,6 +22,9 @@ const (
 	nftTableName     = "portbridge"
 	nftFlowtableName = "fastpath"
 	nftOwnerPrefix   = "Go-nftables-portbridge:managed:v1"
+	// Admit acceleration after conventional forward-hook firewall decisions.
+	// Equal-priority external chains are rejected because ordering is undefined.
+	nftForwardPriority = 2147483647
 )
 
 type nftRuleSpec struct {
@@ -40,6 +39,14 @@ type nftRuleSpec struct {
 	Protocol        string
 	ConntrackMark   uint32
 	EnableFlowtable bool
+	ruleIdentity    string // recovered full hash, or a tagged legacy short identity
+}
+
+type nftRenderState struct {
+	retired       []nftRuleSpec
+	suspended     []nftRuleSpec
+	binding       string
+	keepFlowtable bool
 }
 
 func (s nftRuleSpec) key() string {
@@ -55,17 +62,42 @@ type nftBackend interface {
 }
 
 type commandNFTBackend struct {
-	binary      string
-	logger      *slog.Logger
-	mu          sync.Mutex
-	initialized bool
-	devicesKey  string
-	initErr     error
-	ownerMarker string
+	logger           *slog.Logger
+	mu               sync.Mutex
+	initialized      bool
+	devicesKey       string
+	initErr          error
+	ownerMarker      string
+	kernel           nftKernelIO
+	interfaces       func() ([]net.Interface, error)
+	pendingTopology  nftTopologySnapshot
+	topologyReady    bool
+	fingerprint      string
+	appliedSpecKey   string
+	appliedActiveKey string
+	conntrack        conntrackKernelIO
+	activeSpecs      []nftRuleSpec
+	pendingSpecs     []nftRuleSpec
+	recovered        bool
+	unknownState     bool
+	suspendedSpecs   []nftRuleSpec
+	policyFamilies   uint8
+	store            *nftStateStore
+	diskSession      *nftDiskSession
+	diskBinding      string
+	cleanProbe       func() error
+	cleanVerified    bool
+	configErr        error
 }
 
 func CleanupNFT(logger *slog.Logger, nftConfig ...config.NFTConfig) error {
+	return CleanupNFTWithConfigPath(logger, "/etc/portbridge/config.json", nftConfig...)
+}
+
+// Cleanup and the running Manager must use the same actual config path/mark.
+func CleanupNFTWithConfigPath(logger *slog.Logger, configPath string, nftConfig ...config.NFTConfig) error {
 	backend := newCommandNFTBackend(logger)
+	backend.store = newNFTStateStore(configPath)
 	if len(nftConfig) > 0 {
 		backend.setConfig(nftConfig[0])
 	}
@@ -80,17 +112,28 @@ func newCommandNFTBackend(logger *slog.Logger) *commandNFTBackend {
 			break
 		}
 	}
-	backend := &commandNFTBackend{binary: binary, logger: logger, ownerMarker: nftOwnerMarker(config.DefaultNFTConntrackMark)}
+	backend := &commandNFTBackend{logger: logger, ownerMarker: nftOwnerMarker(config.DefaultNFTConntrackMark)}
 	if binary == "" {
 		backend.initErr = errors.New("no trusted root-owned nft executable was found in the fixed system paths")
 	}
+	backend.kernel = &nftCommandIO{binary: binary, initErr: backend.initErr}
+	backend.interfaces = net.Interfaces
+	backend.conntrack = newCommandConntrack()
+	backend.store = newNFTStateStore("/etc/portbridge/config.json")
+	backend.cleanProbe = verifyEmptyNetfilter
 	return backend
 }
 
 func (n *commandNFTBackend) setConfig(nftConfig config.NFTConfig) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.ownerMarker = nftOwnerMarker(nftConfig.ConntrackMark)
+	owner := nftOwnerMarker(nftConfig.ConntrackMark)
+	if owner != n.ownerMarker && (n.recovered || len(n.activeSpecs)+len(n.pendingSpecs)+len(n.suspendedSpecs) > 0) {
+		n.configErr = errors.New("instance mark change requires verified cleanup using the previous config/mark before restart")
+		return
+	}
+	n.ownerMarker = owner
+	n.configErr = nil
 }
 
 func nftOwnerMarker(mark uint32) string {
@@ -99,7 +142,7 @@ func nftOwnerMarker(mark uint32) string {
 
 func trustedRootExecutable(path string) bool {
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || info.Mode().Perm()&0o111 == 0 {
 		return false
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
@@ -122,134 +165,291 @@ func trustedRootExecutable(path string) bool {
 	return true
 }
 
-func (n *commandNFTBackend) Replace(specs []nftRuleSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	exists, owned, err := n.tableState()
+func (n *commandNFTBackend) replaceObjects(specs, retired []nftRuleSpec, keepFlowtable bool, held ...[]nftRuleSpec) error {
+	var suspended []nftRuleSpec
+	if len(held) > 0 {
+		suspended = held[0]
+	}
+	state, err := n.observe()
 	if err != nil {
 		return err
 	}
-	if exists && !owned {
+	if state.exists && !state.owned {
 		return fmt.Errorf("refusing to modify foreign nftables table inet %s without ownership marker %q", nftTableName, n.ownerMarker)
 	}
-	if len(specs) == 0 {
-		if !exists {
-			n.initialized = false
-			n.devicesKey = ""
-			return nil
+	for _, spec := range uniqueNFTSpecs(specs, retired, suspended) {
+		if spec.ConntrackMark == 0 || nftOwnerMarker(spec.ConntrackMark) != n.ownerMarker {
+			return errors.New("nftables plan has a mismatched instance mark")
 		}
-		if err := n.run("delete table inet "+nftTableName+"\n", "-f", "-"); err != nil {
+		if err := validateRetirementSpec(spec); err != nil {
 			return err
 		}
-		n.initialized = false
-		n.devicesKey = ""
+	}
+	topology := n.topologyForFlowtable(specsUseFlowtable(specs) || keepFlowtable)
+	n.topologyReady = false
+	if topology.err != nil {
+		return fmt.Errorf("discover nftables flowtable devices: %w", topology.err)
+	}
+	if (specsUseFlowtable(specs) || keepFlowtable) && len(topology.devices) == 0 {
+		return errors.New("no non-loopback device is available for the nftables flowtable")
+	}
+	devicesKey := topology.key()
+	journal, err := decodeNFTJournal(state.objects, n.ownerMarker)
+	if err != nil {
+		return err
+	}
+	canRefresh := state.exists && n.initialized && n.devicesKey == devicesKey && state.fingerprint == n.fingerprint && journal.binding == n.diskBinding
+	keyFor := func(active, retired, suspended []nftRuleSpec) string {
+		return nftAppliedStateKey(active, retired, suspended, keepFlowtable, n.diskBinding)
+	}
+	specKey := keyFor(specs, retired, suspended)
+	if canRefresh && specKey == n.appliedSpecKey {
 		return nil
 	}
-	devices := []string{}
-	if specsUseFlowtable(specs) {
-		devices, err = nftFlowtableDevices()
-		if err != nil {
-			return fmt.Errorf("discover nftables flowtable devices: %w", err)
-		}
-		if len(devices) == 0 {
-			return errors.New("no non-loopback device is available for the nftables flowtable")
+	if !state.exists && len(specs)+len(retired)+len(suspended) == 0 && n.diskSession == nil {
+		n.clearAppliedState()
+		return nil
+	}
+	var persistErr error
+	if n.diskSession != nil {
+		confirmed := diskNFTSnapshot(n.activeSpecs, n.pendingSpecs, n.suspendedSpecs)
+		target := diskNFTSnapshot(specs, retired, suspended)
+		persistErr = n.diskSession.prepare(confirmed, target)
+		if persistErr != nil {
+			// A failed intent must not prevent independently justified withdrawal.
+			// No new admissions or new offload; keep ALL old pending ownership.
+			specs = previouslyAdmittedNFT(specs, n.activeSpecs)
+			retired = uniqueNFTSpecs(n.pendingSpecs, retired, retiredNFTSpecs(n.activeSpecs, specs))
+			suspended = gateNFTReplacements(suspended, retired)
+			keepFlowtable = specsUseFlowtable(specs)
+			topology = n.topologyForFlowtable(keepFlowtable)
+			n.topologyReady = false
+			if topology.err != nil {
+				return errors.Join(persistErr, topology.err)
+			}
+			devicesKey = topology.key()
+			canRefresh = canRefresh && n.devicesKey == devicesKey
+			specKey = keyFor(specs, retired, suspended)
+			if len(n.activeSpecs)+len(n.pendingSpecs)+len(n.suspendedSpecs) == 0 {
+				return fmt.Errorf("persist recovery intent (new admission refused): %w", persistErr)
+			}
 		}
 	}
-	devicesKey := strings.Join(devices, "\x00")
-	if exists && n.initialized && n.devicesKey == devicesKey {
-		if err := n.run(renderNFTChainRefreshScript(specs), "-f", "-"); err == nil {
-			return nil
+	if len(specs)+len(retired)+len(suspended) == 0 {
+		if state.exists {
+			if _, err := n.kernel.Apply("delete table inet " + nftTableName + "\n"); err != nil {
+				return errors.Join(persistErr, err)
+			}
+			observed, err := n.observe()
+			if err != nil {
+				n.initialized = false
+				return errors.Join(persistErr, err)
+			}
+			if observed.exists {
+				n.initialized = false
+				return errors.New("owned nftables table deletion was not confirmed")
+			}
+		}
+		n.clearAppliedState()
+		if persistErr != nil {
+			return persistErr
+		}
+		if n.diskSession != nil {
+			if err := n.diskSession.checkpoint(diskNFTSnapshot(nil, nil, nil)); err != nil {
+				return fmt.Errorf("persist empty recovery checkpoint: %w", err)
+			}
+		}
+		return nil
+	}
+	renderState := nftRenderState{retired: retired, suspended: suspended, binding: n.diskBinding, keepFlowtable: keepFlowtable}
+	options := nftJournalOptions{suspended: suspended, binding: n.diskBinding}
+	activeKey := nftSpecsKey(specs)
+	script := renderNFTScript(specs, state.exists, topology.names(), renderState)
+	if canRefresh {
+		if n.appliedActiveKey == activeKey {
+			var b strings.Builder
+			writeNFTJournal(&b, specs, retired, false, options)
+			script = b.String()
 		} else {
-			n.logger.Warn("nftables chain refresh failed; rebuilding managed table", "error", err)
+			script = renderNFTChainRefreshWithState(specs, [][]nftRuleSpec{retired}, options)
 		}
 	}
-	if err := n.run(renderNFTScript(specs, exists, devices), "-f", "-"); err != nil {
-		return err
+	if n.logger != nil {
+		n.logger.Debug("applying managed nftables transaction", "rebuild_objects", !canRefresh, "paths", len(specs), "suspended_paths", len(suspended))
+	}
+	if _, err := n.kernel.Apply(script); err != nil {
+		return errors.Join(persistErr, err)
+	}
+	observed, err := n.observe()
+	if err != nil {
+		n.initialized = false
+		return errors.Join(persistErr, err)
+	}
+	if !observed.exists || !observed.owned {
+		n.initialized = false
+		return errors.New("managed nftables table changed before verification")
+	}
+	if err := validateNFTState(observed.objects, specs, topology.names(), n.ownerMarker, renderState); err != nil {
+		n.initialized = false
+		return errors.Join(persistErr, err)
 	}
 	n.initialized = true
 	n.devicesKey = devicesKey
+	n.fingerprint = observed.fingerprint
+	n.appliedSpecKey = specKey
+	n.appliedActiveKey = activeKey
+	n.activeSpecs = append([]nftRuleSpec(nil), specs...)
+	n.pendingSpecs = append([]nftRuleSpec(nil), retired...)
+	n.suspendedSpecs = append([]nftRuleSpec(nil), suspended...)
+	if persistErr != nil {
+		return fmt.Errorf("old admission gated but recovery intent persistence failed: %w", persistErr)
+	}
+	if n.diskSession != nil {
+		if err := n.diskSession.checkpoint(diskNFTSnapshot(specs, retired, suspended)); err != nil {
+			n.initialized = false
+			return fmt.Errorf("kernel readback succeeded but recovery checkpoint failed: %w", err)
+		}
+	}
 	return nil
 }
 
 func (n *commandNFTBackend) TopologyKey() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.initErr != nil {
 		return "error:" + n.initErr.Error()
 	}
-	devices, err := nftFlowtableDevices()
-	if err != nil {
-		return "error:" + err.Error()
+	list := n.interfaces
+	if list == nil {
+		list = net.Interfaces
 	}
-	return strings.Join(devices, "\x00")
+	n.pendingTopology = collectNFTTopology(list)
+	n.topologyReady = true
+	return n.pendingTopology.key()
 }
 
-func (n *commandNFTBackend) Delete() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	exists, owned, err := n.tableState()
-	if err != nil {
-		return err
-	}
-	if !exists {
-		n.initialized = false
-		n.devicesKey = ""
-		return nil
-	}
-	if !owned {
-		return fmt.Errorf("refusing to delete foreign nftables table inet %s without ownership marker %q", nftTableName, n.ownerMarker)
-	}
-	if err := n.run("delete table inet "+nftTableName+"\n", "-f", "-"); err != nil {
-		return err
-	}
+func (n *commandNFTBackend) clearAppliedState() {
 	n.initialized = false
 	n.devicesKey = ""
-	return nil
+	n.fingerprint = ""
+	n.appliedSpecKey = ""
+	n.appliedActiveKey = ""
+	n.activeSpecs = nil
+	n.pendingSpecs = nil
+	n.suspendedSpecs = nil
+	n.topologyReady = false
 }
 
-func (n *commandNFTBackend) tableState() (bool, bool, error) {
-	if n.initErr != nil {
-		return false, false, n.initErr
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, n.binary, "list", "table", "inet", nftTableName) // #nosec G204 -- binary is selected from fixed, root-owned, non-writable system paths.
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		return true, strings.Contains(string(output), `comment "`+n.ownerMarker+`"`), nil
-	}
-	if errors.Is(err, exec.ErrNotFound) {
-		return false, false, fmt.Errorf("nft executable not found at %s", n.binary)
-	}
-	message := string(output)
-	if strings.Contains(message, "No such file or directory") || strings.Contains(message, "does not exist") {
-		return false, false, nil
-	}
-	if ctx.Err() != nil {
-		return false, false, fmt.Errorf("check nftables table: %w", ctx.Err())
-	}
-	return false, false, fmt.Errorf("check nftables table: %w: %s", err, strings.TrimSpace(message))
+func (n *commandNFTBackend) topologyFor(specs []nftRuleSpec) nftTopologySnapshot {
+	return n.topologyForFlowtable(specsUseFlowtable(specs))
 }
 
-func (n *commandNFTBackend) run(input string, args ...string) error {
-	if n.initErr != nil {
+func (n *commandNFTBackend) topologyForFlowtable(enabled bool) nftTopologySnapshot {
+	if !enabled {
+		return nftTopologySnapshot{}
+	}
+	if !n.topologyReady {
+		list := n.interfaces
+		if list == nil {
+			list = net.Interfaces
+		}
+		n.pendingTopology = collectNFTTopology(list)
+		n.topologyReady = true
+	}
+	return n.pendingTopology
+}
+
+func (n *commandNFTBackend) Healthy(specs []nftRuleSpec) (bool, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.refreshMissingExecutables()
+	if n.configErr != nil {
+		return false, n.configErr
+	}
+	if n.initErr != nil && len(specs) == 0 {
+		if !n.cleanVerified {
+			return false, nil
+		}
+		if err := n.verifyCLIIndependentEmpty(); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	n.cleanVerified = false
+	state, err := n.observe()
+	if err != nil {
+		n.unknownState = true
+		return false, err
+	}
+	if state.exists && !state.owned {
+		n.unknownState = true
+		return false, errors.New("managed nftables table owner does not match")
+	}
+	if specsUseFlowtable(specs) {
+		if err := n.checkAdmissionFor(specs); err != nil {
+			var admission *nftAdmissionError
+			if !errors.As(err, &admission) {
+				n.unknownState = true
+			}
+			return false, err
+		}
+	}
+	if !n.recovered || len(n.pendingSpecs) > 0 || len(n.suspendedSpecs) > 0 || n.unknownState {
+		return false, nil
+	}
+	if len(specs) == 0 {
+		n.topologyReady = false
+		return !state.exists, nil
+	}
+	topology := n.topologyFor(specs)
+	if topology.err != nil {
+		return false, topology.err
+	}
+	healthy := state.exists && n.initialized && n.appliedActiveKey == nftSpecsKey(specs) && n.devicesKey == topology.key() && n.fingerprint == state.fingerprint
+	if healthy {
+		n.topologyReady = false
+	}
+	return healthy, nil
+}
+
+func (n *commandNFTBackend) refreshMissingExecutables() {
+	if command, ok := n.kernel.(*nftCommandIO); ok && command.initErr != nil {
+		for _, path := range []string{"/usr/sbin/nft", "/usr/bin/nft"} {
+			if trustedRootExecutable(path) {
+				command.binary = path
+				command.initErr = nil
+				n.initErr = nil
+				n.recovered = false
+				n.cleanVerified = false
+				break
+			}
+		}
+	}
+	if command, ok := n.conntrack.(*commandConntrack); ok && command.initErr != nil {
+		n.conntrack = newCommandConntrack()
+	}
+}
+func (n *commandNFTBackend) verifyCLIIndependentEmpty() error {
+	n.cleanVerified = false
+	if n.cleanProbe == nil {
 		return n.initErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, n.binary, args...) // #nosec G204 -- binary is trusted and all arguments are internal fixed nft options.
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	cmd.Stdin = strings.NewReader(input)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("apply nftables transaction: %w", ctx.Err())
+	if n.store != nil {
+		if err := n.store.checkExisting(n.ownerMarker); err != nil {
+			n.unknownState = true
+			return err
 		}
-		return fmt.Errorf("apply nftables transaction: %w: %s", err, strings.TrimSpace(output.String()))
 	}
+	if err := n.cleanProbe(); err != nil {
+		n.unknownState = true
+		n.recovered = false
+		return err
+	}
+	// Independent kernel evidence, not the lack of a CLI/file/current NFT plan.
+	n.clearAppliedState()
+	n.recovered = true
+	n.unknownState = false
+	n.cleanVerified = true
 	return nil
 }
 
@@ -271,38 +471,58 @@ func specsUseFlowtable(specs []nftRuleSpec) bool {
 	return false
 }
 
-func renderNFTScript(specs []nftRuleSpec, exists bool, devices []string) string {
+func renderNFTScript(specs []nftRuleSpec, exists bool, devices []string, journal ...nftRenderState) string {
 	devices = append([]string(nil), devices...)
 	sort.Strings(devices)
 
 	var b strings.Builder
-	if exists {
-		b.WriteString("flush table inet " + nftTableName + "\n")
-	} else {
-		mark := config.DefaultNFTConntrackMark
-		if len(specs) > 0 && specs[0].ConntrackMark != 0 {
-			mark = specs[0].ConntrackMark
-		}
-		fmt.Fprintf(&b, "add table inet %s { comment %q; }\n", nftTableName, nftOwnerMarker(mark))
+	var state nftRenderState
+	if len(journal) > 0 {
+		state = journal[0]
 	}
+	if exists {
+		b.WriteString("delete table inet " + nftTableName + "\n")
+	}
+	mark := config.DefaultNFTConntrackMark
+	if len(specs) > 0 && specs[0].ConntrackMark != 0 {
+		mark = specs[0].ConntrackMark
+	} else if len(state.retired) > 0 {
+		mark = state.retired[0].ConntrackMark
+	} else if len(state.suspended) > 0 {
+		mark = state.suspended[0].ConntrackMark
+	}
+	fmt.Fprintf(&b, "add table inet %s { comment %q; }\n", nftTableName, nftOwnerMarker(mark))
 	b.WriteString("add chain inet " + nftTableName + " prerouting { type nat hook prerouting priority dstnat; policy accept; }\n")
 	b.WriteString("add chain inet " + nftTableName + " output { type nat hook output priority dstnat; policy accept; }\n")
 	b.WriteString("add chain inet " + nftTableName + " postrouting { type nat hook postrouting priority srcnat; policy accept; }\n")
-	if specsUseFlowtable(specs) {
+	if specsUseFlowtable(specs) || state.keepFlowtable {
 		fmt.Fprintf(&b, "add flowtable inet %s %s { hook ingress priority filter; devices = { %s }; counter; }\n",
 			nftTableName, nftFlowtableName, nftDeviceSet(devices))
 	}
-	b.WriteString("add chain inet " + nftTableName + " forward { type filter hook forward priority filter; policy accept; }\n")
+	fmt.Fprintf(&b, "add chain inet %s forward { type filter hook forward priority %d; policy accept; }\n", nftTableName, nftForwardPriority)
 	writeNFTRules(&b, specs)
+	if len(specs)+len(state.retired)+len(state.suspended) > 0 {
+		writeNFTJournal(&b, specs, state.retired, true, nftJournalOptions{suspended: state.suspended, binding: state.binding})
+	}
 	return b.String()
 }
 
-func renderNFTChainRefreshScript(specs []nftRuleSpec) string {
+func renderNFTChainRefreshScript(specs []nftRuleSpec, retired ...[]nftRuleSpec) string {
+	return renderNFTChainRefreshWithState(specs, retired, nftJournalOptions{})
+}
+func renderNFTChainRefreshWithState(specs []nftRuleSpec, retired [][]nftRuleSpec, options nftJournalOptions) string {
 	var b strings.Builder
+	var pending []nftRuleSpec
+	if len(retired) > 0 {
+		pending = retired[0]
+	}
 	for _, chain := range []string{"prerouting", "output", "postrouting", "forward"} {
 		fmt.Fprintf(&b, "flush chain inet %s %s\n", nftTableName, chain)
 	}
 	writeNFTRules(&b, specs)
+	if len(specs)+len(pending)+len(options.suspended) > 0 {
+		writeNFTJournal(&b, specs, pending, false, options)
+	}
 	return b.String()
 }
 
@@ -319,9 +539,9 @@ func writeNFTRules(b *strings.Builder, specs []nftRuleSpec) {
 			nftTableName, spec.ConntrackMark, nftTargetMatch(spec), spec.Protocol,
 			portText(spec.TargetPort, spec.TargetPortEnd), nftComment(spec, "postrouting"))
 		if spec.EnableFlowtable {
-			fmt.Fprintf(b, "add rule inet %s forward ct mark 0x%08x %s %s dport %s ct state established,related flow add @%s counter accept comment %q\n",
+			fmt.Fprintf(b, "add rule inet %s forward ct mark 0x%08x %s %s dport %s %s ct state established,related flow add @%s counter accept comment %q\n",
 				nftTableName, spec.ConntrackMark, nftTargetMatch(spec), spec.Protocol,
-				portText(spec.TargetPort, spec.TargetPortEnd), nftFlowtableName, nftComment(spec, "flowtable"))
+				portText(spec.TargetPort, spec.TargetPortEnd), nftOriginalFlowMatch(spec), nftFlowtableName, nftComment(spec, "flowtable"))
 		} else {
 			fmt.Fprintf(b, "add rule inet %s forward ct mark 0x%08x %s %s dport %s counter accept comment %q\n",
 				nftTableName, spec.ConntrackMark, nftTargetMatch(spec), spec.Protocol,
@@ -330,28 +550,26 @@ func writeNFTRules(b *strings.Builder, specs []nftRuleSpec) {
 	}
 }
 
-func nftFlowtableDevices() ([]string, error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	devices := make([]string, 0, len(interfaces))
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		devices = append(devices, iface.Name)
-	}
-	sort.Strings(devices)
-	return devices, nil
-}
-
 func nftDeviceSet(devices []string) string {
 	quoted := make([]string, 0, len(devices))
 	for _, device := range devices {
 		quoted = append(quoted, strconv.Quote(device))
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// Shared target/mark is not enough: a suspended rule must not borrow another
+// rule's acceleration entry point for an existing NAT connection.
+func nftOriginalFlowMatch(spec nftRuleSpec) string {
+	text := "ct original proto-dst " + portText(spec.ListenPort, spec.ListenPortEnd)
+	if !spec.ListenHost.IsUnspecified() {
+		family := "ip"
+		if spec.Family == 6 {
+			family = "ip6"
+		}
+		text += " ct original " + family + " daddr " + spec.ListenHost.String()
+	}
+	return text
 }
 
 func nftDestinationMatch(spec nftRuleSpec, hook string) string {
@@ -423,4 +641,8 @@ func portText(start, end int) string {
 		return strconv.Itoa(start)
 	}
 	return strconv.Itoa(start) + "-" + strconv.Itoa(end)
+}
+
+func nftAppliedStateKey(active, retired, suspended []nftRuleSpec, keepFlowtable bool, binding string) string {
+	return nftSpecsKey(active) + "\nretired:" + nftSpecsKey(retired) + "\nsuspended:" + nftSpecsKey(suspended) + "\nkeep-flowtable:" + strconv.FormatBool(keepFlowtable) + "\nbinding:" + binding
 }

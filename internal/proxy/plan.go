@@ -191,6 +191,11 @@ func (m *Manager) resolveTarget(rule config.Rule, allowCached bool) ([]netip.Add
 	addresses, err := m.resolver.LookupNetIP(ctx, rule.TargetHost)
 	if err != nil || len(addresses) == 0 {
 		if cached, ok := m.resolved[rule.ID]; allowCached && ok && cached.host == rule.TargetHost && len(cached.addrs) > 0 {
+			for _, address := range cached.addrs {
+				if policyErr := config.ValidateTargetAddress(rule, address); policyErr != nil {
+					return nil, fmt.Errorf("cached target authorization failed: %w", policyErr)
+				}
+			}
 			m.logger.Warn("DNS refresh failed; retaining previous target", "rule", rule.Name, "target", rule.TargetHost, "error", err)
 			return append([]netip.Addr(nil), cached.addrs...), nil
 		}

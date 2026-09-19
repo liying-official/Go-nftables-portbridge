@@ -1,8 +1,8 @@
-# Go-nftables-portbridge v2.4.4 — Vendored patches / 依赖补丁
+# Go-nftables-portbridge v2.4.9 — Vendored patches / 依赖补丁
 
 ## English
 
-v2.4.4 uses Go 1.27.1 and vendors the required packages from `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0`.
+v2.4.9 preserves the reviewed v2.4.4 vendor bytes, using Go 1.27.1, `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0`. This source candidate has no valid release signature; old signed manifests are not included.
 
 The module checksums recorded in `go.sum` are:
 
@@ -19,7 +19,7 @@ The upstream module checksum does not authenticate local vendor edits. The signe
 
 ## 简体中文
 
-v2.4.4 使用 Go 1.27.1，vendoring `golang.org/x/net v0.58.0` 和 `golang.org/x/sys v0.47.0` 中需要的包。上方摘要与 `go.sum` 一致；`h1:` 是 Go 模块校验值，不是 Release 压缩包的 SHA-256。
+v2.4.9 原样保留已审核 v2.4.4 的 vendor 字节，使用 Go 1.27.1、`golang.org/x/net v0.58.0` 和 `golang.org/x/sys v0.47.0`。本源码候选未签名，不包含旧签名清单。上方摘要与 `go.sum` 一致；`h1:` 是 Go 模块校验值，不是压缩包 SHA-256。
 
 已记录的本地批量地址复用补丁位于 `vendor/golang.org/x/net/internal/socket/mmsghdr_unix.go` 和 `sys_posix.go`：Linux 批量读取会复用调用方预填的 `net.UDPAddr` 及 `net.IP` 底层数组；未预填 `Message.Addr` 的调用保持上游行为。
 

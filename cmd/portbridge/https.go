@@ -246,7 +246,11 @@ func printHTTPSInfo(web config.WebConfig, language string) error {
 			fmt.Println("WARNING: using a self-signed certificate. Verify its fingerprint through a trusted channel before trusting it. Replace it in Web settings and restart when a CA-issued certificate is available.")
 		}
 	}
-	fmt.Printf("Certificate SHA-256: %s\nCertificate expires: %s\n", status.SHA256, status.NotAfter.Format(time.RFC3339))
+	if language == "zh-CN" {
+		fmt.Printf("证书 SHA-256: %s\n证书到期时间: %s\n", status.SHA256, status.NotAfter.Format(time.RFC3339))
+	} else {
+		fmt.Printf("Certificate SHA-256: %s\nCertificate expires: %s\n", status.SHA256, status.NotAfter.Format(time.RFC3339))
+	}
 	for _, host := range []string{web.ListenIPv4, web.ListenIPv6} {
 		if host == "" {
 			continue

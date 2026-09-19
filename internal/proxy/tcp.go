@@ -89,12 +89,25 @@ func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dia
 	defer stopIdleMonitor()
 	uploadDone := make(chan int64, 1)
 	go func() {
-		n, _ := copyTCPStream(upstream, client)
-		closeWrite(upstream)
+		n, copyErr := copyTCPStream(upstream, client)
+		if copyErr != nil {
+			// A failed direction cannot complete by half-closing alone: wake
+			// the reverse copy so the existing deferred reservations return.
+			_ = upstream.Close()
+			_ = client.Close()
+		} else {
+			closeWrite(upstream)
+		}
 		uploadDone <- n
 	}()
-	down, _ := copyTCPStream(client, upstream)
-	closeWrite(client)
+	down, copyErr := copyTCPStream(client, upstream)
+	if copyErr != nil {
+		_ = upstream.Close()
+		_ = client.Close()
+	} else {
+		// Normal EOF still permits the peer to finish the other direction.
+		closeWrite(client)
+	}
 	up := <-uploadDone
 	if up > 0 {
 		r.stats.bytesUp.Add(uint64(up)) // #nosec G115 -- io.Copy byte counts are non-negative and checked above.

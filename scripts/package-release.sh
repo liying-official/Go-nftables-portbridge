@@ -127,37 +127,30 @@ for path in \
 done
 
 LDFLAGS="-s -w -buildid= -X main.version=$VERSION"
-for arch in amd64 arm64; do
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" \
-    -o "$COMMON/dist/go-nftables-portbridge-linux-$arch" ./cmd/portbridge
-done
-
-AMD64_SHA="$(sha256sum "$COMMON/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)"
-ARM64_SHA="$(sha256sum "$COMMON/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)"
 
 find "$COMMON" -type d -exec chmod 0755 {} +
 find "$COMMON" -type f -exec chmod 0644 {} +
 find "$COMMON/scripts" -type f -name '*.sh' -exec chmod 0755 {} +
-chmod 0755 "$COMMON/dist/go-nftables-portbridge-linux-amd64" "$COMMON/dist/go-nftables-portbridge-linux-arm64"
 
 cp -a -- "$COMMON" "$STAGING/$EN_NAME"
 cp -a -- "$COMMON" "$STAGING/$ZH_NAME"
 
-cp -- "$STAGING/$EN_NAME/scripts/install.sh" "$STAGING/$EN_NAME/scripts/install.zh-CN.sh"
-cp -- "$STAGING/$EN_NAME/scripts/uninstall.sh" "$STAGING/$EN_NAME/scripts/uninstall.zh-CN.sh"
-cp -- "$STAGING/$EN_NAME/scripts/install.en.sh" "$STAGING/$EN_NAME/scripts/install.sh"
-cp -- "$STAGING/$EN_NAME/scripts/uninstall.en.sh" "$STAGING/$EN_NAME/scripts/uninstall.sh"
-
-cp -- "$STAGING/$ZH_NAME/README.md" "$STAGING/$ZH_NAME/README.en-US.md"
-cp -- "$STAGING/$ZH_NAME/RELEASE_NOTES.md" "$STAGING/$ZH_NAME/RELEASE_NOTES.en-US.md"
-cp -- "$STAGING/$ZH_NAME/README.zh-CN.md" "$STAGING/$ZH_NAME/README.md"
-cp -- "$STAGING/$ZH_NAME/RELEASE_NOTES.zh-CN.md" "$STAGING/$ZH_NAME/RELEASE_NOTES.md"
-sed -i '3s|(README.md)|(README.en-US.md)|' "$STAGING/$ZH_NAME/README.md"
+python3 "$ROOT_DIR/scripts/localize-package.py" "$STAGING/$EN_NAME" en-US
+python3 "$ROOT_DIR/scripts/localize-package.py" "$STAGING/$ZH_NAME" zh-CN
+for bundle in "$EN_NAME" "$ZH_NAME"; do
+  for arch in amd64 arm64; do
+    (cd -- "$STAGING/$bundle"; CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" \
+      -o "dist/go-nftables-portbridge-linux-$arch" ./cmd/portbridge)
+  done
+done
 
 write_bundle_metadata() {
   local bundle_root="$1"
   local source_manifest="$bundle_root/source-tree.sha256"
   local bundle_manifest="$bundle_root/release-bundle-manifest.json"
+  local AMD64_SHA ARM64_SHA
+  AMD64_SHA="$(sha256sum "$bundle_root/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)"
+  ARM64_SHA="$(sha256sum "$bundle_root/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)"
   (
     cd -- "$bundle_root"
     LC_ALL=C find . -type f \
@@ -210,8 +203,10 @@ printf '%s\n' \
   "  \"release_toolchain\": \"$ACTUAL_TOOLCHAIN\"," \
   '  "minimum_source_toolchain": "go1.27.1",' \
   '  "binaries": [' \
-  "    {\"os\":\"linux\",\"arch\":\"amd64\",\"sha256\":\"$AMD64_SHA\"}," \
-  "    {\"os\":\"linux\",\"arch\":\"arm64\",\"sha256\":\"$ARM64_SHA\"}" \
+  "    {\"os\":\"linux\",\"arch\":\"amd64\",\"language\":\"en-US\",\"sha256\":\"$(sha256sum "$STAGING/$EN_NAME/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)\"}," \
+  "    {\"os\":\"linux\",\"arch\":\"arm64\",\"language\":\"en-US\",\"sha256\":\"$(sha256sum "$STAGING/$EN_NAME/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)\"}," \
+  "    {\"os\":\"linux\",\"arch\":\"amd64\",\"language\":\"zh-CN\",\"sha256\":\"$(sha256sum "$STAGING/$ZH_NAME/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)\"}," \
+  "    {\"os\":\"linux\",\"arch\":\"arm64\",\"language\":\"zh-CN\",\"sha256\":\"$(sha256sum "$STAGING/$ZH_NAME/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)\"}" \
   '  ],' \
   '  "archives": [' \
   "    {\"file\":\"${EN_NAME}.tar.gz\",\"language\":\"en-US\",\"bytes\":$EN_SIZE,\"sha256\":\"$EN_SHA\"}," \
@@ -226,9 +221,11 @@ ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$MANIFEST"
 )
 ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$CHECKSUMS"
 
-"$COMMON/dist/go-nftables-portbridge-linux-amd64" -version
-"$GO_BIN" version -m "$COMMON/dist/go-nftables-portbridge-linux-amd64" | grep -F "$ACTUAL_TOOLCHAIN"
-"$GO_BIN" version -m "$COMMON/dist/go-nftables-portbridge-linux-arm64" | grep -F "$ACTUAL_TOOLCHAIN"
+for bundle in "$EN_NAME" "$ZH_NAME"; do
+  "$STAGING/$bundle/dist/go-nftables-portbridge-linux-amd64" -version
+  "$GO_BIN" version -m "$STAGING/$bundle/dist/go-nftables-portbridge-linux-amd64" | grep -F "$ACTUAL_TOOLCHAIN"
+  "$GO_BIN" version -m "$STAGING/$bundle/dist/go-nftables-portbridge-linux-arm64" | grep -F "$ACTUAL_TOOLCHAIN"
+done
 (
   cd -- "$RELEASE_DIR"
   sha256sum -c "$(basename "$CHECKSUMS")"

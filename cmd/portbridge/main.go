@@ -131,7 +131,7 @@ func main() {
 			logger.Error("cannot read nftables cleanup configuration", "error", readErr)
 			os.Exit(1)
 		}
-		if err := proxy.CleanupNFT(logger, nftConfig); err != nil {
+		if err := proxy.CleanupNFTWithConfigPath(logger, cfgPath, nftConfig); err != nil {
 			logger.Error("cannot clean up nftables data plane", "error", err)
 			os.Exit(1)
 		}
@@ -178,6 +178,10 @@ func main() {
 		os.Exit(1)
 	}
 	proxyManager := proxy.NewManager(logger, cfg.Web.DNSServers)
+	if err := proxyManager.SetNFTStateConfigPath(cfgPath); err != nil {
+		logger.Error("cannot select nft recovery location", "error", err)
+		os.Exit(1)
+	}
 	proxyManager.SetRuntimeConfig(cfg.Limits, cfg.NFT)
 	proxyManager.Apply(cfg.Rules)
 

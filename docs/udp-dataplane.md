@@ -1,4 +1,4 @@
-# Go-nftables-portbridge v2.4.4 — UDP dataplane / UDP 数据面
+# Go-nftables-portbridge v2.4.9 — UDP dataplane / UDP 数据面
 
 ## English
 
@@ -14,16 +14,20 @@ UDP listener → SO_REUSEPORT workers → ReadBatch/recvmmsg
 
 - Each worker owns its listener, packet slabs, batch messages, flow/session table, epoll instance, timing wheel and statistics. One worker goroutine services its listener and connected upstream sockets; there is no per-session or per-packet goroutine.
 - IPv4 and IPv6 use separate sockets. Same-family and cross-family forwarding use the same session model.
-- Packet/message/address structures are preallocated and reused. Mixed-session batches are grouped using reusable packet indices; `netip.AddrPort` is the session key.
+- Packet/message/address structures are preallocated and reused. Mixed-session batches are grouped using reusable packet indices; `netip.AddrPort` is the explicit-bind session key; wildcard keys also include local destination and necessary interface scope. Empty datagrams remain budgeted packets.
 - The documented local `x/net/internal/socket` patch reuses a pre-populated UDP address and IP backing array; see [vendored patches](../VENDOR_PATCHES.md).
 - Session lookup is worker-local. Source accounting uses 64 rule-level shards shared across Go workers, port ranges, address families and fallback runners. A packet holds one short source-budget lock, never across socket I/O or creation.
 - Source session/rate reservations are rolled back on creation failure and released on timeout/shutdown. Time-based refill uses monotonic elapsed time. Rate limits are token buckets with bounded bursts, not fixed-window packet counts.
 - Expiry uses a 512-slot, one-second worker-local timing wheel. Shared idle-source cleanup is bounded to four shards and 256 entries per shard per incremental sweep; active source records are retained.
 - Truncated datagrams exceeding `udp_packet_buffer_size` are dropped and counted; partial payloads are not forwarded. JSON, database work and per-packet logging remain outside the forwarding path.
 
+Wildcard reply control data is owned per session, OOB slabs are reused, and new costs are reserved within unchanged budgets. Global replies follow routing; scoped addresses retain interface identity. See [forwarding limits](forwarding-limits.md).
+
+Batch syscall failures may return `-1` with an error. The worker preserves that error with zero completed packets instead of misclassifying it as malformed counts. EAGAIN/EWOULDBLOCK, ENOBUFS, ENOMEM and EINTR on send do not destroy an otherwise valid session; unsent packets are counted as drops. Invalid counts and fatal descriptor failures are still rejected. This does not guarantee zero loss under overload or add buffering/retry queues.
+
 ### Defaults and capacity boundaries
 
-| Setting | v2.4.4 default |
+| Setting | v2.4.9 default |
 |---|---|
 | Automatic rule worker budget | `min(GOMAXPROCS, 16)`; each listener endpoint still needs at least one worker |
 | Batch size | `64` messages |
@@ -55,7 +59,7 @@ UDP GRO/GSO is not enabled by default. It needs ancillary-data handling, segment
 
 Check NIC RX/TX queues, RSS distribution, IRQ/CPU/NUMA placement and socket/softnet/NIC drop counters first. RPS/XPS and CPU affinity need workload-specific validation; the program does not pin every worker with `LockOSThread` by default.
 
-nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.4.4.
+nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.4.9.
 
 ## 简体中文
 
@@ -65,15 +69,19 @@ nftables/flowtable integrates naturally with same-family NAT. Go batch forwardin
 
 - 每个 worker 拥有监听 socket、packet slab、batch message、会话表、epoll、时间轮和统计。一个 worker goroutine 同时处理入口及 connected 上游 socket，不按会话或数据报创建 goroutine。
 - IPv4/IPv6 socket 独立，同族和跨族沿用同一会话模型。
-- 预分配并复用报文、消息和地址结构；交错 batch 使用可复用索引聚合，以 `netip.AddrPort` 为会话键。`x/net/internal/socket` 的地址复用补丁见[依赖补丁说明](../VENDOR_PATCHES.md)。
+- 预分配并复用报文、消息和地址结构；交错 batch 使用可复用索引聚合，以 `netip.AddrPort` 为明确绑定会话键；通配 key 同时包含本地目的地址与必要 scope。空数据报仍是计数和消耗配额的真实报文。`x/net/internal/socket` 的地址复用补丁见[依赖补丁说明](../VENDOR_PATCHES.md)。
 - 会话查找是 worker-local；来源计数由规则级 64 分片在 Go worker、端口段、地址族及 fallback 间共享。每包只持有一个短锁，锁不跨 socket 创建或 I/O。
 - 会话创建失败会回滚预留，超时/停止会释放计数；补充令牌使用单调时间差。速率是允许受限突发的令牌桶，不是固定窗口内严格包数。
 - 使用 512 槽、1 秒粒度的 worker-local 时间轮；共享空闲来源每次增量清理最多检查 4 个分片、每片 256 项，不删除活跃来源。
 - 超出 `udp_packet_buffer_size` 并被截断的报文会丢弃并计数，不转发残缺数据；逐包路径不做 JSON、数据库或日志操作。
 
+通配回复控制数据归会话独立持有，OOB slab 复用，新增开销计入既有预算；全局地址按路由回程，scoped 地址保留接口身份。参见[转发限制](forwarding-limits.md)。
+
 ### 默认值与容量边界
 
-| 设置 | v2.4.4 默认值 |
+批量系统调用失败可能返回 `-1` 和错误；worker 将其保留为零完成量及原错误，不再误判成非法计数。发送时的 EAGAIN/EWOULDBLOCK、ENOBUFS、ENOMEM、EINTR 不销毁仍有效的会话，未发送包计入丢弃；非法计数和致命描述符错误仍然拒绝。这不保证过载零丢包，也不新增缓冲或重试队列。
+
+| 设置 | v2.4.9 默认值 |
 |---|---|
 | 自动整规则 worker 预算 | `min(GOMAXPROCS, 16)`，每个监听端点仍至少需要 1 个 worker |
 | Batch 大小 | `64` |
@@ -105,4 +113,4 @@ Web 每 500 ms 串行轮询并读取快照，不参与逐包工作；当前文�
 
 先检查 NIC 队列、RSS、IRQ/CPU/NUMA 分布及 socket/softnet/NIC 丢包；RPS/XPS 和绑核需要业务验证。程序默认不以 `LockOSThread` 固定每个 worker。
 
-nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.4.4 已启用的数据面。
+nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.4.9 已启用的数据面。

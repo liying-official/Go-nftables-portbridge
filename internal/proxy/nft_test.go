@@ -53,7 +53,7 @@ func TestRenderNFTScriptDualStackRanges(t *testing.T) {
 		"add table inet portbridge",
 		"comment \"Go-nftables-portbridge:managed:v1:50420001\"",
 		"add flowtable inet portbridge fastpath { hook ingress priority filter; devices = { \"eth0\", \"eth1\" }; counter; }",
-		"type filter hook forward priority filter",
+		"type filter hook forward priority 2147483647",
 		"type nat hook prerouting priority dstnat",
 		"type nat hook output priority dstnat",
 		"type nat hook postrouting priority srcnat",

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -23,6 +24,8 @@ type Manager struct {
 	budgets        map[string]*ruleBudget
 	resources      *resourceBudget
 	rules          map[string]config.Rule
+	desiredRules   map[string]config.Rule
+	nftTombstones  map[string]string
 	dataPlanes     map[string]string
 	resolver       *DNSResolver
 	resolved       map[string]resolvedTarget
@@ -34,9 +37,11 @@ type Manager struct {
 }
 
 type RuleRuntime struct {
-	Rule      config.Rule   `json:"rule"`
-	Stats     StatsSnapshot `json:"stats"`
-	DataPlane string        `json:"data_plane"`
+	Rule        config.Rule   `json:"rule"`
+	Stats       StatsSnapshot `json:"stats"`
+	DataPlane   string        `json:"data_plane"`
+	GoRunning   bool          `json:"go_running"`
+	KernelState string        `json:"kernel_state"`
 }
 
 func NewManager(logger *slog.Logger, dnsServers ...[]string) *Manager {
@@ -50,19 +55,37 @@ func NewManager(logger *slog.Logger, dnsServers ...[]string) *Manager {
 func newManagerWithNFT(logger *slog.Logger, resolver *DNSResolver, nft nftBackend) *Manager {
 	defaults := config.Default()
 	return &Manager{
-		logger:       logger,
-		runners:      make(map[string]*runner),
-		stats:        make(map[string]*Stats),
-		budgets:      make(map[string]*ruleBudget),
-		resources:    newResourceBudget(defaults.Limits),
-		rules:        make(map[string]config.Rule),
-		dataPlanes:   make(map[string]string),
-		resolver:     resolver,
-		resolved:     make(map[string]resolvedTarget),
-		nft:          nft,
-		nftMark:      defaults.NFT.ConntrackMark,
-		nftFlowtable: defaults.NFT.EnableFlowtable,
+		logger:        logger,
+		runners:       make(map[string]*runner),
+		stats:         make(map[string]*Stats),
+		budgets:       make(map[string]*ruleBudget),
+		resources:     newResourceBudget(defaults.Limits),
+		rules:         make(map[string]config.Rule),
+		desiredRules:  make(map[string]config.Rule),
+		nftTombstones: make(map[string]string),
+		dataPlanes:    make(map[string]string),
+		resolver:      resolver,
+		resolved:      make(map[string]resolvedTarget),
+		nft:           nft,
+		nftMark:       defaults.NFT.ConntrackMark,
+		nftFlowtable:  defaults.NFT.EnableFlowtable,
 	}
+}
+
+// SetNFTStateConfigPath is called before Apply, with the same config path that
+// CleanupNFTWithConfigPath receives. Changing a live identity is not supported.
+func (m *Manager) SetNFTStateConfigPath(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.rules) > 0 || m.nftInitialized {
+		return fmt.Errorf("cannot change recovery location on an active manager")
+	}
+	if n, ok := m.nft.(*commandNFTBackend); ok {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		n.store = newNFTStateStore(path)
+	}
+	return nil
 }
 
 func (m *Manager) SetRuntimeConfig(limits config.ResourceLimits, nftConfig config.NFTConfig) {
@@ -84,8 +107,8 @@ func (m *Manager) SetDNSServers(servers []string) {
 	m.mu.Lock()
 	m.resolver.SetServers(servers)
 	m.resolved = make(map[string]resolvedTarget)
-	rules := make([]config.Rule, 0, len(m.rules))
-	for _, rule := range m.rules {
+	rules := make([]config.Rule, 0, len(m.desiredRules))
+	for _, rule := range m.desiredRules {
 		rules = append(rules, rule)
 	}
 	m.mu.Unlock()
@@ -108,6 +131,7 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 	for _, raw := range rules {
 		r := config.NormalizeRule(raw)
 		desired[r.ID] = r
+		delete(m.nftTombstones, r.ID)
 		if _, ok := m.stats[r.ID]; !ok {
 			m.stats[r.ID] = &Stats{}
 		}
@@ -115,6 +139,7 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 			m.budgets[r.ID] = &ruleBudget{}
 		}
 	}
+	m.desiredRules = desired
 	plan := m.buildPlan(rules, allowCachedDNS)
 	goErrors := make(map[string][]string)
 	desiredSlots := make(map[string]goPath, len(plan.goRules))
@@ -130,14 +155,92 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 			// runner cannot bind and the rule remains down until the next refresh.
 			path, exists = desiredSlots[goPathSlotKey(pathKey)]
 		}
-		if exists && ruleKey(path.Rule) != ruleKey(current.rule) {
+		if !exists || ruleKey(path.Rule) != ruleKey(current.rule) {
 			current.stop()
 			delete(m.runners, pathKey)
 		}
 	}
 
+	newNFTKey := nftSpecsKey(plan.nftSpecs)
+	if specsUseFlowtable(plan.nftSpecs) {
+		newNFTKey += "\nflowtable-devices:" + m.nft.TopologyKey()
+	}
+	var nftErr error
+	nftCleanupFailed := false
+	nftInspectionFailed := false
+	needsNFTUpdate := !m.nftInitialized || newNFTKey != m.nftKey
+	if checker, ok := m.nft.(interface {
+		Healthy([]nftRuleSpec) (bool, error)
+	}); ok {
+		healthy, healthErr := checker.Healthy(plan.nftSpecs)
+		if healthErr != nil {
+			var admission *nftAdmissionError
+			if errors.As(healthErr, &admission) {
+				needsNFTUpdate = true
+			} else {
+				nftErr = fmt.Errorf("inspect nftables state: %w", healthErr)
+				nftCleanupFailed = true
+				nftInspectionFailed = true
+			}
+		} else if !healthy {
+			needsNFTUpdate = true
+		}
+	}
+	if nftErr == nil && needsNFTUpdate {
+		nftErr = m.nft.Replace(plan.nftSpecs)
+		if nftErr == nil {
+			m.nftInitialized = true
+			m.nftKey = newNFTKey
+			m.logger.Info("nftables data plane applied", "paths", len(plan.nftSpecs))
+		} else {
+			applyErr := nftErr
+			if _, aware := m.nft.(nftRetirementReporter); aware {
+				m.nftInitialized = false
+				m.nftKey = ""
+				m.logger.Error("nftables reconciliation incomplete; recovery state retained", "error", applyErr)
+			} else if cleanupErr := m.nft.Delete(); cleanupErr == nil {
+				m.nftInitialized = false
+				m.nftKey = ""
+				m.logger.Error("failed to apply nftables data plane; removed managed rules, old conntrack revocation is not established", "error", applyErr)
+			} else {
+				nftCleanupFailed = true
+				nftErr = fmt.Errorf("%w; failed to remove possibly stale nftables rules: %v", applyErr, cleanupErr)
+				m.logger.Error("failed to apply or clean up nftables data plane; stale forwarding may remain active", "error", nftErr)
+			}
+		}
+	}
+
+	blockedRules, verifiedNFT := m.nftRetirementStatus(desired, plan, nftErr, nftInspectionFailed)
+	if _, aware := m.nft.(nftRetirementReporter); aware {
+		nftCleanupFailed = false
+	} else if nftCleanupFailed {
+		for id, plane := range m.dataPlanes {
+			if dataPlaneUsesNFT(plane) {
+				blockedRules[id] = true
+			}
+		}
+	}
+
+	blockedGoPaths := make(map[string]bool)
+	for pathKey, path := range plan.goRules {
+		if _, aware := m.nft.(nftRetirementReporter); aware {
+			blockedGoPaths[pathKey] = m.goPathBlockedByNFT(path.Rule, nftErr, nftInspectionFailed)
+		} else {
+			blockedGoPaths[pathKey] = blockedRules[path.RuleID]
+		}
+	}
+	for pathKey, current := range m.runners {
+		if blockedGoPaths[pathKey] {
+			current.stop()
+			delete(m.runners, pathKey)
+		}
+	}
 	for pathKey, path := range plan.goRules {
 		if _, ok := m.runners[pathKey]; ok {
+			continue
+		}
+		if blockedGoPaths[pathKey] {
+			goErrors[path.RuleID] = append(goErrors[path.RuleID], "waiting for previous kernel forwarding to be revoked")
 			continue
 		}
 		r := path.Rule
@@ -151,29 +254,6 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 		}
 		m.runners[pathKey] = run
 		logGoPathStarted(m.logger, path)
-	}
-
-	newNFTKey := nftSpecsKey(plan.nftSpecs) + "\nflowtable-devices:" + m.nft.TopologyKey()
-	var nftErr error
-	nftCleanupFailed := false
-	if !m.nftInitialized || newNFTKey != m.nftKey {
-		nftErr = m.nft.Replace(plan.nftSpecs)
-		if nftErr == nil {
-			m.nftInitialized = true
-			m.nftKey = newNFTKey
-			m.logger.Info("nftables data plane applied", "paths", len(plan.nftSpecs))
-		} else {
-			applyErr := nftErr
-			if cleanupErr := m.nft.Delete(); cleanupErr == nil {
-				m.nftInitialized = false
-				m.nftKey = ""
-				m.logger.Error("failed to apply nftables data plane; removed managed table to fail closed", "error", applyErr)
-			} else {
-				nftCleanupFailed = true
-				nftErr = fmt.Errorf("%w; failed to remove possibly stale nftables rules: %v", applyErr, cleanupErr)
-				m.logger.Error("failed to apply or clean up nftables data plane; stale forwarding may remain active", "error", nftErr)
-			}
-		}
 	}
 
 	for pathKey, current := range m.runners {
@@ -191,6 +271,33 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 		previousPlane := m.dataPlanes[id]
 		m.rules[id] = r
 		m.dataPlanes[id] = plan.dataPlanes[id]
+		if blockedRules[id] {
+			// A newly requested Go path must not masquerade as a running NFT
+			// rule merely because inspection is unavailable. The additive
+			// kernel_state still explicitly exposes the unresolved risk.
+			kernelState, known := m.nftRuleState(id)
+			if !known && !dataPlaneUsesNFT(previousPlane) && plan.usesGo[id] {
+				m.stats[id].setRunning(false, "Go listener is not running; kernel state is "+kernelState+": "+nftErr.Error())
+				continue
+			}
+			if dataPlaneUsesNFT(previousPlane) {
+				m.dataPlanes[id] = previousPlane
+			} else {
+				m.dataPlanes[id] = DataPlaneNFT
+			}
+			for _, run := range m.runners {
+				if run.rule.ID == id {
+					m.dataPlanes[id] = DataPlaneHybrid
+					break
+				}
+			}
+			if kernelState == "admission-suspended" {
+				m.stats[id].setRunning(true, "new NFT admission is suspended; established NAT connections may remain; no automatic fallback: "+nftErr.Error())
+			} else {
+				m.stats[id].setRunning(true, "previous kernel forwarding may still be active; revocation is incomplete: "+nftErr.Error())
+			}
+			continue
+		}
 		if !r.Enabled {
 			if nftCleanupFailed && dataPlaneUsesNFT(previousPlane) {
 				m.dataPlanes[id] = previousPlane
@@ -204,7 +311,7 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 		if err := plan.errors[id]; err != nil {
 			failures = append(failures, err.Error())
 		}
-		if plan.usesNFT[id] && nftErr != nil {
+		if plan.usesNFT[id] && nftErr != nil && !verifiedNFT[id] {
 			failures = append(failures, nftErr.Error())
 		}
 		if errs := goErrors[id]; len(errs) > 0 {
@@ -234,6 +341,10 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 
 	for id := range m.rules {
 		if _, ok := desired[id]; !ok {
+			if blockedRules[id] {
+				m.stats[id].setRunning(true, "previous kernel forwarding may still be active; revocation is incomplete: "+nftErr.Error())
+				continue
+			}
 			if nftCleanupFailed && dataPlaneUsesNFT(m.dataPlanes[id]) {
 				m.stats[id].setRunning(true, "failed to remove previous nftables path; forwarding may still be active: "+nftErr.Error())
 				continue
@@ -243,6 +354,7 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 			delete(m.budgets, id)
 			delete(m.dataPlanes, id)
 			delete(m.resolved, id)
+			delete(m.nftTombstones, id)
 		}
 	}
 }
@@ -266,7 +378,21 @@ func (m *Manager) Stop() {
 	}
 	if err := m.nft.Delete(); err != nil {
 		m.logger.Error("failed to remove nftables data plane", "error", err)
+		for id, stats := range m.stats {
+			if dataPlaneUsesNFT(m.dataPlanes[id]) {
+				stats.setRunning(true, "kernel cleanup failed; previous forwarding may still be active: "+err.Error())
+			} else {
+				stats.setRunning(false, "")
+			}
+		}
+	} else {
+		for id, stats := range m.stats {
+			stats.setRunning(false, "")
+			m.dataPlanes[id] = DataPlaneDisabled
+		}
 	}
+	m.nftInitialized = false
+	m.nftKey = ""
 }
 
 func (m *Manager) Runtime() []RuleRuntime {
@@ -274,7 +400,15 @@ func (m *Manager) Runtime() []RuleRuntime {
 	defer m.mu.Unlock()
 	out := make([]RuleRuntime, 0, len(m.rules))
 	for id, r := range m.rules {
-		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id]})
+		kernelState, _ := m.nftRuleState(id)
+		goRunning := false
+		for _, run := range m.runners {
+			if run.rule.ID == id {
+				goRunning = true
+				break
+			}
+		}
+		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id], GoRunning: goRunning, KernelState: kernelState})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Rule.Name == out[j].Rule.Name {

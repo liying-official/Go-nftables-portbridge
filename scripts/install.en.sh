@@ -146,9 +146,9 @@ fi
 for TLS_NAME in "${TLS_NAMES[@]}"; do TLS_PREFLIGHT+=(--tls-name "$TLS_NAME"); done
 "$BIN" "${TLS_PREFLIGHT[@]}"
 
-if ! command -v nft >/dev/null 2>&1; then
+if ! command -v nft >/dev/null 2>&1 || ! command -v conntrack >/dev/null 2>&1; then
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables conntrack
 fi
 
 if getent group portbridge >/dev/null; then
@@ -187,15 +187,24 @@ done
 
 # Stop the currently loaded unit before replacing the binary/unit. This lets a
 # legacy release run its own cleanup and avoids adopting an unmarked nft table.
+OLD_UNIT_STOP_OK=false
 if systemctl list-unit-files portbridge.service --no-legend 2>/dev/null | grep -q portbridge.service; then
-  if ! systemctl stop portbridge.service; then
-    echo "The old unit's post-stop cleanup failed; after confirming its main process exited, the installer will retry ownership-aware cleanup as root." >&2
+  if systemctl stop portbridge.service; then
+    OLD_UNIT_STOP_OK=true
+  else
+    echo "The old unit's post-stop cleanup failed. Root retry is permitted only for legacy deployments without service-bound recovery files." >&2
   fi
 fi
 systemctl is-active --quiet portbridge.service && { echo "Existing service did not stop cleanly." >&2; exit 1; }
 pgrep -x portbridge >/dev/null 2>&1 && { echo "A portbridge process is still running; refusing to replace the binary." >&2; exit 1; }
 if [[ -x /usr/local/bin/portbridge ]]; then
-  /usr/local/bin/portbridge --config=/etc/portbridge/config.json --cleanup-nft
+  if [[ -e /etc/portbridge/config.json.nft-state.json || -L /etc/portbridge/config.json.nft-state.json ]]; then
+    # v2.4.6 records are bound to the service UID. Do not impersonate that
+    # identity from the legacy root fallback or erase an unresolved record.
+    [[ $OLD_UNIT_STOP_OK == true ]] || { echo "Service-identity NFT recovery is incomplete; retain the old binary and recovery files." >&2; exit 1; }
+  else
+    /usr/local/bin/portbridge --config=/etc/portbridge/config.json --cleanup-nft
+  fi
 fi
 
 for STATE_FILE in /etc/portbridge/config.json /etc/portbridge/admin.token; do

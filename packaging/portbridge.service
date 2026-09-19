@@ -10,7 +10,7 @@ User=portbridge
 Group=portbridge
 EnvironmentFile=-/etc/default/portbridge
 ExecStart=/usr/local/bin/portbridge --config=/etc/portbridge/config.json --token-file=/etc/portbridge/admin.token --require-https $PORTBRIDGE_ARGS
-ExecStopPost=/usr/local/bin/portbridge --cleanup-nft
+ExecStopPost=/usr/local/bin/portbridge --cleanup-nft --config=/etc/portbridge/config.json $PORTBRIDGE_ARGS
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=30s
@@ -38,6 +38,8 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectProc=invisible
 ProcSubset=pid
+# Only the kernel boot identity is exposed; /proc/sys remains otherwise hidden.
+BindReadOnlyPaths=/proc/sys/kernel/random/boot_id:/run/portbridge-boot-id
 RestrictSUIDSGID=true
 RestrictRealtime=true
 RestrictNamespaces=true
