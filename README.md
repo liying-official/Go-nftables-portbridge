@@ -4,7 +4,7 @@
 
 A Linux TCP/UDP layer-4 port forwarder with a Go control plane and Web UI, nftables/flowtable acceleration for same-family traffic, and a high-performance Go proxy for cross-family traffic.
 
-> **v2.4.9 source release with Ed25519 detached archive signatures. Includes bounded selective ACL proof, original-tuple flowtable isolation, single-device nft JSON compatibility and correct nonblocking UDP error handling. The published source archives are signed; locally compiled binaries are not automatically publisher-signed. No prebuilt binaries are included. Signatures do not provide a universal capacity or deployment-safety guarantee. Read [current support and limits](docs/forwarding-limits.md).**
+> **v2.4.9 provides signed Linux amd64/arm64 prebuilt packages in English and Simplified Chinese. Includes bounded selective ACL proof, original-tuple flowtable isolation, single-device nft JSON compatibility and correct nonblocking UDP error handling. Top-level checksums and internal installation manifests have Ed25519 signatures. Prebuilt installation needs no Go compiler; locally rebuilt binaries are not automatically publisher-signed. Signatures do not provide a universal capacity or deployment-safety guarantee. Read [current support and limits](docs/forwarding-limits.md).**
 
 ## Highlights
 
@@ -20,7 +20,7 @@ A Linux TCP/UDP layer-4 port forwarder with a Go control plane and Web UI, nftab
 - Web rule management, runtime/data-plane state, Go-proxy traffic/session/drop counters, and 500 ms serialized monitoring refresh. Inspect nftables-path counters with `nft`.
 - Atomic JSON configuration, hot rule updates, 256-bit token authentication, CSRF/origin protection, and direct-peer LAN/CIDR ACLs.
 - Native TLS and an explicit strict-IP-allowlist mode for direct public management, with early connection filtering and authentication throttling.
-- Linux amd64/arm64 static-build support and a hardened systemd unit; this release ships source only, without prebuilt binaries.
+- Linux amd64/arm64 static-build support and a hardened systemd unit; Release packages provide prebuilt binaries by architecture and language.
 - Fully vendored `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0` dependencies for offline builds.
 
 ## Architecture
@@ -50,7 +50,7 @@ For a wildcard listener, the controller plans IPv4 and IPv6 paths separately. If
 - Root access for installation.
 - Exactly Go 1.27.1 when building from source or producing release binaries.
 
-This source release has no prebuilt binaries and requires Go 1.27.1.
+Each Release package contains one architecture-specific binary, localized GUI, installer and documentation, with source included for inspection. Installing it does not require Go.
 
 Compatibility history: the preceding release was validated on Debian 13 and Ubuntu 26.04. v2.4.9 was validated on Debian 13; Ubuntu was not revalidated for this version. Other compatible Linux distributions can be tested independently. The installer uses apt-get when nftables or conntrack is missing; non-APT systems must install both first.
 
@@ -74,24 +74,69 @@ These are the values produced by the installer when no configuration exists:
 
 Management port `9080` is independent of forwarding ports. Only explicitly configured rules open forwarding endpoints. Upgrades retain the existing management port, listeners and rules while enforcing HTTPS.
 
-## Isolated source evaluation
+## First installation using prebuilt Release packages
 
-Download the language archive, its matching `.sig`, `SHA256SUMS`, `SHA256SUMS.sig`, and `release-signers` from the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9) into one directory. Before extracting, verify the detached signature with an independently trusted release key, then check SHA256SUMS. Signed source archives authenticate the exact published bytes; production deployment still requires environment-specific validation and a rollback plan.
+This procedure is for a Linux host without an existing PortBridge installation. Back up configuration and plan a maintenance window for existing instances instead. Prepare Bash, curl, CA certificates, tar/gzip, sha256sum, awk, OpenSSH `ssh-keygen`, systemd and the system dependencies listed above. Go is not required. In a root shell, omit `sudo` from the commands below.
+
+### 1. Select the architecture and download the English package
+
+Run on the target server. `x86_64` maps to amd64; `aarch64`/`arm64` maps to arm64. The commands select automatically. Assets are `portbridge-v2.4.9-linux-amd64-en-US.tar.gz` and `portbridge-v2.4.9-linux-arm64-en-US.tar.gz` on the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9). Do not choose GitHub-generated Source code archives: they contain no prebuilt binary. Run the following steps sequentially in the same Bash session.
 
 ```bash
-ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
-sha256sum -c SHA256SUMS
-tar -xzf Go-nftables-portbridge-v2.4.9-en-US.tar.gz
-cd Go-nftables-portbridge-v2.4.9-en-US
-export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-mod=vendor GOWORK=off GOENV=off
-go version  # must report go1.27.1
-go test ./...
-go build -trimpath -ldflags="-X main.version=2.4.9" -o build/portbridge ./cmd/portbridge
+set -euo pipefail
+case "$(uname -m)" in
+  x86_64) PB_ARCH=amd64 ;;
+  aarch64|arm64) PB_ARCH=arm64 ;;
+  *) echo 'Unsupported architecture' >&2; exit 1 ;;
+esac
+PB_LANG='en-US'
+PB_NAME="portbridge-v2.4.9-linux-${PB_ARCH}-${PB_LANG}"
+PB_URL='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.4.9'
+PB_WORK=$(mktemp -d)
+cd "$PB_WORK"
+curl -q -fL --proto '=https' --proto-redir '=https' -o "$PB_NAME.tar.gz" "$PB_URL/$PB_NAME.tar.gz"
+for PB_FILE in SHA256SUMS SHA256SUMS.sig SBOM; do
+  curl -q -fL --proto '=https' --proto-redir '=https' -H 'Cache-Control: no-cache' \
+    -o "$PB_FILE" "$PB_URL/$PB_FILE?release=binary-v2.4.9"
+done
+curl -q -fL --proto '=https' --proto-redir '=https' -o release-signers \
+  'https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/c54d27252e5e76fe76eaf8a3c63f37cab304eb40/packaging/release-signers'
 ```
 
-For the full privileged namespace matrix, run `sudo bash scripts/verify-candidate.sh /absolute/path/to/go1.27.1/bin/go` on an isolated evaluation host. It creates fresh network namespaces and a private evidence/cache directory, fails on skipped mandatory coverage, and does not modify host firewall rules. The path must point to the actual supplied toolchain.
+The signer file is downloaded from a fixed source commit; independently confirm the expected fingerprint below before trusting it. A key obtained alongside an archive is not independent proof of identity. If a same-name checksum asset is cached from an older release, fetch the current file again; never bypass verification.
 
-On an isolated evaluation host, the existing clean-source installer (`sudo ./scripts/install.sh`) compiles with Go 1.27.1 from its fixed PATH, installs nftables/conntrack as needed, enables forwarding, provisions HTTPS and starts the service. It changes system state; validate the target environment before a production rollout. Prebuilt installation still requires the unchanged pinned signature checks.
+### 2. Verify and install
+
+Verify the Ed25519 signature on SHA256SUMS before selecting the archive and SBOM hashes from that trusted list. The other three packages need not be downloaded. Stop on any failure. The current Release has no per-archive `.tar.gz.sig` or separate `release-signers` asset.
+
+```bash
+PB_EXPECTED_FP='SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o'
+test "$(ssh-keygen -lf release-signers -E sha256 | awk '{print $2}')" = "$PB_EXPECTED_FP"
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
+awk -v file="$PB_NAME.tar.gz" '$2 == file || $2 == "SBOM" { print; n++ } END { if (n != 2) exit 1 }' SHA256SUMS > selected-SHA256SUMS
+sha256sum -c selected-SHA256SUMS
+tar -xzf "$PB_NAME.tar.gz"
+cd "$PB_NAME"
+test "$(./dist/go-nftables-portbridge-linux-$PB_ARCH -version)" = '2.4.9'
+sudo ./scripts/install.sh
+```
+
+The installer uses the bundled binary for the current architecture, checking the pinned key, signed internal manifest, source/script hashes, binary hash and version before installation. No Go compiler is required. Do not remove `dist/` or bypass verification. Installation creates the service account, deploys the systemd unit, enables forwarding and starts the service. Missing nftables/conntrack dependencies are installed with apt-get; non-APT systems must prepare them first.
+
+Without supplied TLS material, the installer generates a ten-year self-signed certificate and requires HTTPS. To use existing material, replace the last command with `sudo ./scripts/install.sh --tls-cert /absolute/path/fullchain.pem --tls-key /absolute/path/privkey.pem`, using real server-local paths. Do not overwrite live configuration with example files.
+
+### 3. Confirm service health and access management
+
+```bash
+systemctl is-active portbridge
+systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
+/usr/local/bin/portbridge -version
+sudo journalctl -u portbridge -n 50 --no-pager
+```
+
+Confirm `active/running`, version `2.4.9` and no repeated restarts. Investigate logs on failure; do not disable HTTPS or permit all IPs. Logs may contain runtime details and must be redacted before sharing. Fresh installations have no forwarding rules: create rules after login and validate real TCP/UDP traffic. ARM64 packages received QEMU user-mode checks, not native ARM64 systemd/kernel acceptance.
+
+Run the SSH tunnel command below on your administrator computer, replacing `SERVER` with the server address. If local port 9080 is occupied, change the first tunnel port and use that port in the browser URL.
 
 The secure default binds management only to loopback. Open an SSH tunnel:
 
@@ -298,7 +343,7 @@ The public project name is `Go-nftables-portbridge`. The installed binary, servi
 - Strict mode filters disallowed peers before TLS handshakes/HTTP parsing, repeats the ACL check in middleware, and caps accepted management connections. An upstream firewall is still required for Internet exposure.
 - The configuration and administrator token are stored with mode `0600`; TLS private keys reject symlinks, unsafe ownership, and broad permissions. The systemd unit disables core dumps, filters dangerous system-call groups, and applies file-descriptor, task, CPU, and memory ceilings.
 - New target selection, including cached DNS during outages, revalidates current authorization. Existing kernel-flow revocation remains subject to the documented forwarding limits.
-- The current Release authenticates source archives with detached Ed25519 signatures and uses the clean-source build path. The separate prebuilt-installer manifest verification remains unchanged; archive signatures do not satisfy that binary-bundle contract.
+- The current Release uses signed SHA256SUMS for the four prebuilt archives and SBOM, plus signed internal manifests binding binaries and source/scripts. Installers retain the pinned verification chain.
 - Default startup logs omit rule names and forwarding endpoints. Debug and error logs can still contain operational network details and must be protected.
 - Never commit `/etc/portbridge/config.json`, `/etc/portbridge/admin.token`, logs, database files, or environment files.
 
@@ -318,23 +363,13 @@ make dist
 
 v2.4.9 is built with Go 1.27.1 and uses `http.Server.MaxHeaderValueCount` together with byte limits. No public `pprof` endpoint is enabled. `make dist` creates unsigned development binaries, not a signed release: the installer intentionally rejects prebuilt files without the required signatures. Do not treat that output as an installable Release or bypass verification.
 
-## Release archive signatures and source builds
+## Release signatures versus source builds
 
-The two uploaded `.tar.gz` source archives and SHA256SUMS each have a matching `.sig` detached signature. They contain no prebuilt binaries and are not the internal bundle manifest/signature required by the prebuilt installer. `go build`, source installation and `make dist` do not automatically publisher-sign the resulting binaries.
+The current Release contains four `portbridge-v2.4.9-linux-{amd64,arm64}-{en-US,zh-CN}.tar.gz` assets, `SHA256SUMS`, `SHA256SUMS.sig` and a CycloneDX 1.6 JSON `SBOM`. Verify the signed checksum file against the trusted release key, then verify the selected archive and SBOM hashes, as shown in the first-install tutorial.
 
-The release public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`, identity `portbridge-release-v2`, namespace `portbridge-release`. Confirm the expected key through an independently trusted project copy/channel before using the downloaded `release-signers`; a key downloaded alongside an archive is not independently trusted by itself. This fingerprint is neither a TLS certificate fingerprint nor an artifact SHA256.
+Each internal `release-bundle-manifest.json.sig` authenticates metadata binding the version, source revision, Go toolchain, architecture and binary/source hashes. Signing identity: `portbridge-release-v2`; namespace: `portbridge-release`; pinned fingerprint: `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`.
 
-```bash
-ssh-keygen -lf release-signers -E sha256
-ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
-sha256sum -c SHA256SUMS
-# Alternatively, verify one language archive directly:
-ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s Go-nftables-portbridge-v2.4.9-en-US.tar.gz.sig < Go-nftables-portbridge-v2.4.9-en-US.tar.gz
-```
-
-SHA256SUMS lists both language packages; download both for a complete checksum check. If downloading only one, verify its archive signature directly; a missing second package is not evidence that the selected archive is corrupt. GitHub-generated Source code (zip/tar.gz), Git checkouts and subsequently modified source trees are not covered by these attachment signatures. Any change to archive bytes requires new checksums and signatures; never reuse old signatures.
-
-Signatures authenticate origin and integrity against a trusted key, not build output, absence of vulnerabilities or suitability for every production environment. The test/manual-release-approval gates in `verify-candidate.sh` are separate from archive verification; signatures neither waive test failures nor change that script's exit policy.
+Git checkouts, GitHub-generated Source code archives and local `go build`/`make dist` outputs do not automatically acquire these release signatures. Signatures authenticate exact artifact origin and integrity, not absence of vulnerabilities or suitability for every production environment. Modified archive bytes require new checksums and signatures.
 
 ## Uninstall
 
