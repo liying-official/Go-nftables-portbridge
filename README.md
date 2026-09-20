@@ -4,10 +4,11 @@
 
 A Linux TCP/UDP layer-4 port forwarder with a Go control plane and Web UI, nftables/flowtable acceleration for same-family traffic, and a high-performance Go proxy for cross-family traffic.
 
-> **Unsigned v2.4.9 source candidate. Includes bounded selective ACL proof, original-tuple flowtable isolation, single-device nft JSON compatibility and correct nonblocking UDP error handling. Source builds are unsigned; validation does not constitute a publisher signature or a universal capacity guarantee. Read [current support and limits](docs/forwarding-limits.md).**
+> **v2.4.9 source release with Ed25519 detached archive signatures. Includes bounded selective ACL proof, original-tuple flowtable isolation, single-device nft JSON compatibility and correct nonblocking UDP error handling. The published source archives are signed; locally compiled binaries are not automatically publisher-signed. No prebuilt binaries are included. Signatures do not provide a universal capacity or deployment-safety guarantee. Read [current support and limits](docs/forwarding-limits.md).**
 
 ## Highlights
 
+- Management HTTP API: read configuration/runtime status, manage rules and settings, and rotate the administrator token; Bearer authentication is required, with CSRF on writes. See the [English API reference](docs/API.en-US.md).
 - TCP, UDP, or TCP + UDP on the same rule and port.
 - IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6, and IPv6 → IPv4.
 - Per-rule data-plane selection: `nftables preferred` or forced `GO`.
@@ -19,7 +20,7 @@ A Linux TCP/UDP layer-4 port forwarder with a Go control plane and Web UI, nftab
 - Web rule management, runtime/data-plane state, Go-proxy traffic/session/drop counters, and 500 ms serialized monitoring refresh. Inspect nftables-path counters with `nft`.
 - Atomic JSON configuration, hot rule updates, 256-bit token authentication, CSRF/origin protection, and direct-peer LAN/CIDR ACLs.
 - Native TLS and an explicit strict-IP-allowlist mode for direct public management, with early connection filtering and authentication throttling.
-- Linux amd64/arm64 static-build support and a hardened systemd unit; this candidate ships source only.
+- Linux amd64/arm64 static-build support and a hardened systemd unit; this release ships source only, without prebuilt binaries.
 - Fully vendored `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0` dependencies for offline builds.
 
 ## Architecture
@@ -49,7 +50,7 @@ For a wildcard listener, the controller plans IPv4 and IPv6 paths separately. If
 - Root access for installation.
 - Exactly Go 1.27.1 when building from source or producing release binaries.
 
-This source candidate has no prebuilt binaries and requires Go 1.27.1.
+This source release has no prebuilt binaries and requires Go 1.27.1.
 
 Compatibility history: the preceding release was validated on Debian 13 and Ubuntu 26.04. v2.4.9 was validated on Debian 13; Ubuntu was not revalidated for this version. Other compatible Linux distributions can be tested independently. The installer uses apt-get when nftables or conntrack is missing; non-APT systems must install both first.
 
@@ -75,9 +76,10 @@ Management port `9080` is independent of forwarding ports. Only explicitly confi
 
 ## Isolated source evaluation
 
-Check the accompanying SHA256SUMS before extracting. This candidate is not signed; do not deploy it in production while the stated blocker remains.
+Download the language archive, its matching `.sig`, `SHA256SUMS`, `SHA256SUMS.sig`, and `release-signers` from the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9) into one directory. Before extracting, verify the detached signature with an independently trusted release key, then check SHA256SUMS. Signed source archives authenticate the exact published bytes; production deployment still requires environment-specific validation and a rollback plan.
 
 ```bash
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
 sha256sum -c SHA256SUMS
 tar -xzf Go-nftables-portbridge-v2.4.9-en-US.tar.gz
 cd Go-nftables-portbridge-v2.4.9-en-US
@@ -89,7 +91,7 @@ go build -trimpath -ldflags="-X main.version=2.4.9" -o build/portbridge ./cmd/po
 
 For the full privileged namespace matrix, run `sudo bash scripts/verify-candidate.sh /absolute/path/to/go1.27.1/bin/go` on an isolated evaluation host. It creates fresh network namespaces and a private evidence/cache directory, fails on skipped mandatory coverage, and does not modify host firewall rules. The path must point to the actual supplied toolchain.
 
-On an isolated evaluation host, the existing clean-source installer (`sudo ./scripts/install.sh`) compiles with Go 1.27.1 from its fixed PATH, installs nftables/conntrack as needed, enables forwarding, provisions HTTPS and starts the service. It changes system state; no production instance was redeployed in this repair. Prebuilt installation still requires the unchanged pinned signature checks.
+On an isolated evaluation host, the existing clean-source installer (`sudo ./scripts/install.sh`) compiles with Go 1.27.1 from its fixed PATH, installs nftables/conntrack as needed, enables forwarding, provisions HTTPS and starts the service. It changes system state; validate the target environment before a production rollout. Prebuilt installation still requires the unchanged pinned signature checks.
 
 The secure default binds management only to loopback. Open an SSH tunnel:
 
@@ -295,8 +297,8 @@ The public project name is `Go-nftables-portbridge`. The installed binary, servi
 - ACL decisions use the direct TCP peer address and do not trust `X-Forwarded-For`.
 - Strict mode filters disallowed peers before TLS handshakes/HTTP parsing, repeats the ACL check in middleware, and caps accepted management connections. An upstream firewall is still required for Internet exposure.
 - The configuration and administrator token are stored with mode `0600`; TLS private keys reject symlinks, unsafe ownership, and broad permissions. The systemd unit disables core dumps, filters dangerous system-call groups, and applies file-descriptor, task, CPU, and memory ceilings.
-- New target selection, including cached DNS during outages, revalidates current authorization. Existing kernel-flow revocation has the explicit candidate limitations above.
-- Prebuilt Release installers retain pinned Ed25519/OpenSSH verification. This unsigned candidate uses the existing clean-source build path.
+- New target selection, including cached DNS during outages, revalidates current authorization. Existing kernel-flow revocation remains subject to the documented forwarding limits.
+- The current Release authenticates source archives with detached Ed25519 signatures and uses the clean-source build path. The separate prebuilt-installer manifest verification remains unchanged; archive signatures do not satisfy that binary-bundle contract.
 - Default startup logs omit rule names and forwarding endpoints. Debug and error logs can still contain operational network details and must be protected.
 - Never commit `/etc/portbridge/config.json`, `/etc/portbridge/admin.token`, logs, database files, or environment files.
 
@@ -316,11 +318,23 @@ make dist
 
 v2.4.9 is built with Go 1.27.1 and uses `http.Server.MaxHeaderValueCount` together with byte limits. No public `pprof` endpoint is enabled. `make dist` creates unsigned development binaries, not a signed release: the installer intentionally rejects prebuilt files without the required signatures. Do not treat that output as an installable Release or bypass verification.
 
-## Candidate integrity
+## Release archive signatures and source builds
 
-Use the accompanying unsigned SHA256SUMS for these candidate artifacts; it proves integrity, not publisher identity. Old dist binaries, bundle manifests/signatures and source-tree.sha256 are excluded. Original signed v2.4.4 input artifacts are preserved separately.
+The two uploaded `.tar.gz` source archives and SHA256SUMS each have a matching `.sig` detached signature. They contain no prebuilt binaries and are not the internal bundle manifest/signature required by the prebuilt installer. `go build`, source installation and `make dist` do not automatically publisher-sign the resulting binaries.
 
-The unchanged public signing fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`, identity `portbridge-release-v2`, namespace `portbridge-release`. This is not a TLS certificate or artifact digest and does not authenticate this candidate. Never reuse old signatures, generate a substitute identity or bypass verification.
+The release public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`, identity `portbridge-release-v2`, namespace `portbridge-release`. Confirm the expected key through an independently trusted project copy/channel before using the downloaded `release-signers`; a key downloaded alongside an archive is not independently trusted by itself. This fingerprint is neither a TLS certificate fingerprint nor an artifact SHA256.
+
+```bash
+ssh-keygen -lf release-signers -E sha256
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
+sha256sum -c SHA256SUMS
+# Alternatively, verify one language archive directly:
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s Go-nftables-portbridge-v2.4.9-en-US.tar.gz.sig < Go-nftables-portbridge-v2.4.9-en-US.tar.gz
+```
+
+SHA256SUMS lists both language packages; download both for a complete checksum check. If downloading only one, verify its archive signature directly; a missing second package is not evidence that the selected archive is corrupt. GitHub-generated Source code (zip/tar.gz), Git checkouts and subsequently modified source trees are not covered by these attachment signatures. Any change to archive bytes requires new checksums and signatures; never reuse old signatures.
+
+Signatures authenticate origin and integrity against a trusted key, not build output, absence of vulnerabilities or suitability for every production environment. The test/manual-release-approval gates in `verify-candidate.sh` are separate from archive verification; signatures neither waive test failures nor change that script's exit policy.
 
 ## Uninstall
 

@@ -4,10 +4,11 @@
 
 Linux TCP/UDP 四层端口转发服务：Go 负责控制面和跨地址族代理，同地址族转发优先使用 nftables DNAT/SNAT 与 flowtable，并提供 Web 管理页面。
 
-> **未签名 v2.4.9 源码候选。包含有界选择性 ACL 证明、原始 tuple 加速隔离、单设备 nft JSON 兼容及正确的非阻塞 UDP 错误处理。源码构建未签名；测试不能替代发布签名，也不代表普遍容量保证。请阅读[当前支持边界](docs/forwarding-limits.md)。**
+> **v2.4.9 源码发布，归档附有 Ed25519 分离签名。包含有界选择性 ACL 证明、原始 tuple 加速隔离、单设备 nft JSON 兼容及正确的非阻塞 UDP 错误处理。发布归档已签名；本地源码构建出的二进制不会自动获得发布者签名。包内不含预编译二进制，签名不代表普遍容量或部署安全保证。请阅读[当前支持边界](docs/forwarding-limits.md)。**
 
 ## 主要功能
 
+- 管理 HTTP API：读取配置/运行状态、管理规则及设置、轮换管理员令牌；使用 Bearer 认证，写操作还需 CSRF。详见[中文 API 接口文档](docs/API.zh-CN.md)。
 - TCP、UDP，或在同一规则和端口同时转发 TCP + UDP。
 - IPv4 → IPv4、IPv6 → IPv6、IPv4 → IPv6、IPv6 → IPv4。
 - 每条规则可选择“nftables 优先”或强制“GO”数据面。
@@ -19,7 +20,7 @@ Linux TCP/UDP 四层端口转发服务：Go 负责控制面和跨地址族代理
 - Web 创建、编辑、启停和删除规则，500ms 串行刷新运行状态、数据面以及 Go proxy 的流量/会话/丢包统计；nftables 路径计数请使用 `nft` 查看。
 - JSON 配置原子写入，规则热更新，256 位令牌认证、CSRF/同源校验与直连来源 IP/CIDR ACL。
 - 公网直连管理支持原生 TLS 与显式严格 IP 白名单，并在 TLS/HTTP 解析前过滤连接及限制认证失败频率。
-- 支持构建 Linux amd64/arm64 静态二进制及强化的 systemd 服务；本候选仅分发源码。
+- 支持构建 Linux amd64/arm64 静态二进制及强化的 systemd 服务；本发布仅分发源码，不含预编译二进制。
 - vendoring `golang.org/x/net v0.58.0`、`golang.org/x/sys v0.47.0`，支持离线构建。
 
 ## 架构
@@ -49,7 +50,7 @@ Web UI ─────────►│ Go Controller │
 - 安装时需要 root。
 - 源码构建与 Release 二进制均要求准确的 Go 1.27.1。
 
-本源码候选不含预编译二进制，需要 Go 1.27.1。
+本源码发布不含预编译二进制，需要 Go 1.27.1。
 
 历史兼容性记录：此前版本已在 Debian 13 / Ubuntu 26.04 验证；v2.4.9 未重新验证 Ubuntu。其他兼容 Linux 发行版可自行测试。任一依赖缺失时安装器使用 apt-get 安装 nftables/conntrack，非 APT 系统请先安装两者。
 
@@ -75,9 +76,10 @@ Web UI ─────────►│ Go Controller │
 
 ## 隔离源码评估
 
-先核对另附 SHA256SUMS 再解压。本候选未签名，所列阻断项未关闭前不能替换生产实例。
+从 [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9) 下载对应语言归档、同名 `.sig`、`SHA256SUMS`、`SHA256SUMS.sig` 和 `release-signers`，放在同一目录。解压前应使用经独立可信渠道确认的发布公钥验证分离签名，再核对 SHA256SUMS。签名认证的是发布归档的准确字节；生产部署仍需完成环境适配验证并准备回滚方案。
 
 ```bash
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
 sha256sum -c SHA256SUMS
 tar -xzf Go-nftables-portbridge-v2.4.9-zh-CN.tar.gz
 cd Go-nftables-portbridge-v2.4.9-zh-CN
@@ -89,7 +91,7 @@ go build -trimpath -ldflags="-X main.version=2.4.9" -o build/portbridge ./cmd/po
 
 完整特权命名空间矩阵可在隔离评估机运行 `sudo bash scripts/verify-candidate.sh /实际绝对路径/go1.27.1/bin/go`。该脚本新建网络命名空间及私有证据/缓存目录，必需覆盖出现 Skip 时失败，不修改宿主机防火墙。请传入实际工具链路径。
 
-在隔离评估机运行既有干净源码安装分支（`sudo ./scripts/install.zh-CN.sh`），会从固定 PATH 使用 Go 1.27.1 构建、按需安装 nftables/conntrack、开启转发、准备 HTTPS 并启动服务。此操作修改系统；本轮未重新部署生产实例。预编译安装仍强制执行原有固定签名校验。
+在隔离评估机运行既有干净源码安装分支（`sudo ./scripts/install.zh-CN.sh`），会从固定 PATH 使用 Go 1.27.1 构建、按需安装 nftables/conntrack、开启转发、准备 HTTPS 并启动服务。此操作修改系统；用于生产前应验证目标环境。预编译安装仍强制执行原有固定签名校验。
 
 安全默认值只监听回环地址，请先建立 SSH 隧道：
 
@@ -285,8 +287,8 @@ sudo nft list flowtable inet portbridge fastpath  # 仅 enable_flowtable=true �
 - ACL 只使用 TCP 直连来源地址，不信任 `X-Forwarded-For`。
 - 严格模式在 TLS 握手/HTTP 解析前过滤不允许的来源，HTTP 中间件会再次校验，并限制已接受的管理连接总数；公网仍必须配置上游防火墙。
 - 配置和管理员令牌均以 `0600` 权限保存；TLS 私钥拒绝符号链接、不安全属主和过宽权限。systemd 单元禁用 core dump、过滤危险系统调用，并设置文件描述符、任务、CPU 与内存上限。
-- 新目标及 DNS 故障时的缓存地址均重新校验当前授权；已有内核连接撤销仍受上述候选限制约束。
-- 预编译 Release 安装保留固定 Ed25519/OpenSSH 校验；本未签名候选使用既有干净源码构建路径。
+- 新目标及 DNS 故障时的缓存地址均重新校验当前授权；已有内核连接撤销仍受文档所列转发限制约束。
+- 当前 Release 通过 Ed25519 分离签名认证源码归档，并使用干净源码构建路径。独立的预编译安装清单验签机制保持不变，归档签名不能替代该二进制包验证契约。
 - 默认启动日志不记录规则名称和转发端点；debug 及错误日志仍可能包含运行网络详情，必须妥善保护。
 - 不要提交 `/etc/portbridge/config.json`、`/etc/portbridge/admin.token`、日志、数据库或环境文件。
 
@@ -307,11 +309,23 @@ make dist
 v2.4.9 使用 Go 1.27.1 构建，以 `http.Server.MaxHeaderValueCount` 配合字节限制约束请求头；不开放公网 `pprof`。
 `make dist` 生成的是未签名开发二进制，不是已签名 Release。安装器会拒绝缺少相应签名的预编译文件；不要把该输出当作可安装 Release，也不要绕过验证。
 
-## 候选包完整性
+## 发布归档签名与源码构建
 
-使用另附未签名 SHA256SUMS 检查完整性；它不证明发布者身份。候选排除旧 dist 二进制、bundle manifest/signature 与 source-tree.sha256；原始 v2.4.4 签名输入另行原样保留。
+签名对象是 Release 上传的两个 `.tar.gz` 源码归档和 `SHA256SUMS`，各有同名 `.sig` 文件。它们不含预编译二进制，也不是预编译安装器要求的内部 bundle manifest/signature。`go build`、源码安装和 `make dist` 不会自动为新生成的二进制添加发布者签名。
 
-公开签名指纹仍为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`，身份 `portbridge-release-v2`，namespace `portbridge-release`。它不是 TLS 证书或制品摘要，也不认证当前候选。不得复用旧签名、生成替代身份或绕过验证。
+发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`，身份 `portbridge-release-v2`，namespace `portbridge-release`。先通过独立可信的项目副本/渠道核对预期公钥，再使用下载的 `release-signers`；不能只相信与归档一起下载的陌生公钥。公钥指纹不是 TLS 证书指纹或制品 SHA256。
+
+```bash
+ssh-keygen -lf release-signers -E sha256
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
+sha256sum -c SHA256SUMS
+# 也可直接验证单个语言归档：
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s Go-nftables-portbridge-v2.4.9-zh-CN.tar.gz.sig < Go-nftables-portbridge-v2.4.9-zh-CN.tar.gz
+```
+
+`SHA256SUMS` 列出两个语言包；完整检查需同时下载两包。仅下载一包时，可以直接验证该归档的分离签名；不要把另一包缺失的提示当作所选归档已损坏。GitHub 自动生成的 Source code (zip/tar.gz)、Git 检出及后来修改的源码树不属于这些附件签名的覆盖对象。任何归档字节变化都需重新计算摘要并重新签名，不能复用旧签名。
+
+签名证明经信任公钥认证的来源及完整性，不证明构建结果、安全无漏洞或适合所有生产环境。`verify-candidate.sh` 的测试/人工发布审批门禁与归档验签是两套机制；签名不能豁免测试失败，也不会改变该脚本的退出策略。
 
 ## 卸载
 
