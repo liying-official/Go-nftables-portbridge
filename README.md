@@ -1,393 +1,216 @@
-# Go-nftables-portbridge v2.4.9
+# Go-nftables-portbridge
+
+[![Release](https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge)](https://github.com/liying-official/Go-nftables-portbridge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational)
+![Architecture: amd64 / arm64](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A Linux TCP/UDP layer-4 port forwarder with a Go control plane and Web UI, nftables/flowtable acceleration for same-family traffic, and a high-performance Go proxy for cross-family traffic.
+**TCP/UDP port forwarding for Linux — manage it through an easy-to-use Web GUI or an HTTP API.**
 
-> **v2.4.9 provides signed Linux amd64/arm64 prebuilt packages in English and Simplified Chinese. Includes bounded selective ACL proof, original-tuple flowtable isolation, single-device nft JSON compatibility and correct nonblocking UDP error handling. Top-level checksums and internal installation manifests have Ed25519 signatures. Prebuilt installation needs no Go compiler; locally rebuilt binaries are not automatically publisher-signed. Signatures do not provide a universal capacity or deployment-safety guarantee. Read [current support and limits](docs/forwarding-limits.md).**
+PortBridge combines nftables/flowtable acceleration for eligible same-family traffic with a Go proxy for IPv4 ↔ IPv6 forwarding. Choose the data plane per rule, update rules without restarting the service, and inspect their runtime status from the browser.
+
+[Download a release](https://github.com/liying-official/Go-nftables-portbridge/releases/latest) · [API reference](docs/API.en-US.md) · [Forwarding limits](docs/forwarding-limits.md) · [Report an issue](https://github.com/liying-official/Go-nftables-portbridge/issues)
 
 ## Highlights
 
-- Management HTTP API: read configuration/runtime status, manage rules and settings, and rotate the administrator token; Bearer authentication is required, with CSRF on writes. See the [English API reference](docs/API.en-US.md).
-- TCP, UDP, or TCP + UDP on the same rule and port.
-- IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6, and IPv6 → IPv4.
-- Per-rule data-plane selection: `nftables preferred` or forced `GO`.
-- nftables DNAT/SNAT plus flowtable fast path for external same-family traffic.
-- Go TCP/UDP proxy for cross-family traffic and loopback fallback.
-- Deterministic one-to-one port-range mapping for up to 4096 ports.
-- Local-process forwarding through nftables `output`, with safe Go fallback for wildcard loopback traffic.
-- Custom DNS servers and 30-second target re-resolution for domain-based rules.
-- Web rule management, runtime/data-plane state, Go-proxy traffic/session/drop counters, and 500 ms serialized monitoring refresh. Inspect nftables-path counters with `nft`.
-- Atomic JSON configuration, hot rule updates, 256-bit token authentication, CSRF/origin protection, and direct-peer LAN/CIDR ACLs.
-- Native TLS and an explicit strict-IP-allowlist mode for direct public management, with early connection filtering and authentication throttling.
-- Linux amd64/arm64 static-build support and a hardened systemd unit; Release packages provide prebuilt binaries by architecture and language.
-- Fully vendored `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0` dependencies for offline builds.
+| Capability | What you get |
+|---|---|
+| Web GUI and API | Create, edit, enable and delete rules; configure settings; inspect runtime state; rotate the administrator token. |
+| TCP / UDP | Forward TCP, UDP or both; map individual ports or equal-length ranges of up to 4096 ports. |
+| IPv4 and IPv6 | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4. |
+| Two data planes | Prefer nftables DNAT/SNAT with optional flowtable acceleration, or explicitly select the Go TCP/UDP proxy. |
+| DNS and monitoring | Custom DNS servers, 30-second domain-target refresh, and Go-proxy traffic/session/drop statistics. |
+| Secure installation | Signed, localized amd64/arm64 release packages; no Go compiler required; HTTPS management and a dedicated systemd service account. |
 
-## Architecture
+**Know the boundary:** the management ACL does not protect forwarding ports. Go-proxy budgets and Web traffic counters do not automatically apply to nftables traffic. Flowtable eligibility depends on kernel support and the surrounding firewall; an ineligible rule is not guaranteed to fall back to Go. See [forwarding limits](docs/forwarding-limits.md) before deploying alongside other firewall/NAT software.
+
+## Quick start
+
+### 1. Prepare the server
+
+Use a **Linux host with systemd**, an **amd64 or arm64 CPU**, and root/sudo access. The host must permit nftables and network sysctl changes; a restricted container is not a substitute for a suitable host. Bash, tar/gzip, `sha256sum`, `awk`, standard GNU/account utilities and `runuser` must be available.
+
+On Debian/Ubuntu, install the additional dependencies once. In a root shell, omit `sudo`:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends ca-certificates curl openssh-client nftables conntrack iproute2
+```
+
+Other distributions need equivalent packages installed through their own package manager. On non-APT systems, preinstall all dependencies: the installer uses `apt-get` if nftables or conntrack is missing.
+
+Compatibility history: preceding releases were tested on Debian 13 / Ubuntu 26.04; this version was revalidated on Debian 13, not Ubuntu. ARM64 received QEMU user-mode checks, not native ARM64 systemd/kernel acceptance. Other compatible Linux distributions may be tested and deployed independently.
+
+### 2. Download, verify and install
+
+The block below installs the **English v2.4.9 prebuilt release**, selecting your CPU architecture automatically. Run the entire block on the server. Root and sudo users are both supported; **Go is not required**. For an existing installation, read [Upgrade and uninstall](#upgrade-and-uninstall) first.
+
+```bash
+bash <<'BASH'
+set +x
+set -euo pipefail
+umask 077
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo 'Unsupported CPU architecture' >&2; exit 1 ;;
+esac
+NAME="portbridge-v2.4.9-linux-${ARCH}-en-US"
+BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.4.9'
+WORK=$(mktemp -d)
+cd "$WORK"
+for FILE in "$NAME.tar.gz" SHA256SUMS SHA256SUMS.sig; do
+  curl -q -fL --proto '=https' --proto-redir '=https' \
+    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.4.9"
+done
+printf '%s\n' 'portbridge-release-v2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVc6m1afFOM3gsLO6VXuLyAlHbkvBP83wlMEqArW/0k' > release-signers
+ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 \
+  -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
+awk -v file="$NAME.tar.gz" '$2 == file { print; n++ } END { if (n != 1) exit 1 }' \
+  SHA256SUMS > selected-SHA256SUMS
+sha256sum -c selected-SHA256SUMS
+mkdir package
+tar -xzf "$NAME.tar.gz" --strip-components=1 -C package
+cd package
+test -x "dist/go-nftables-portbridge-linux-$ARCH"
+if (( EUID == 0 )); then ./scripts/install.sh; else sudo ./scripts/install.sh; fi
+test "$(/usr/local/bin/portbridge -version)" = '2.4.9'
+systemctl is-active --quiet portbridge
+test "$(systemctl show portbridge -p SubState --value)" = running
+systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
+printf 'Installed; extracted release directory: %s\n' "$PWD"
+BASH
+```
+
+This verifies the signed checksum list **before extracting or running the archive**, checks the selected package hash, and invokes the bundled installer. The installer then verifies the pinned release key, internal manifest, source/script hashes, binary hash and version. Any failed check stops the flow; never bypass it.
+
+The final commands require version `2.4.9` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
+
+#### Release files and signature trust
+
+Use the attached assets on the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9), not GitHub's automatically generated **Source code** archives.
+
+| CPU | English package | Simplified Chinese package |
+|---|---|---|
+| amd64 / x86_64 | `portbridge-v2.4.9-linux-amd64-en-US.tar.gz` | `portbridge-v2.4.9-linux-amd64-zh-CN.tar.gz` |
+| arm64 / aarch64 | `portbridge-v2.4.9-linux-arm64-en-US.tar.gz` | `portbridge-v2.4.9-linux-arm64-zh-CN.tar.gz` |
+
+The release also includes `SHA256SUMS`, `SHA256SUMS.sig` and `SBOM`. The quick start downloads only your selected archive and the two checksum files. It does not need the other three packages or the SBOM to install. There is no separate per-archive `.tar.gz.sig` or `release-signers` asset in this release.
+
+The verification block pins the public key instead of trusting a key downloaded with the archive. Confirm this fingerprint through a trusted, independent channel before first use:
 
 ```text
-                 ┌───────────────┐
-Web UI ─────────►│ Go Controller │
-                 └───────┬───────┘
-                         │
-           ┌─────────────┴─────────────┐
-           │                           │
-           ▼                           ▼
-   same-family forwarding      cross-family forwarding
-   IPv4 → IPv4                 IPv4 → IPv6
-   IPv6 → IPv6                 IPv6 → IPv4
-           │                           │
-           ▼                           ▼
-  nftables DNAT/SNAT                 Go net
-  + flowtable fast path         TCP/UDP proxy
+SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o
 ```
 
-For a wildcard listener, the controller plans IPv4 and IPv6 paths separately. If the target only has IPv4 addresses, non-loopback IPv4 traffic uses nftables, IPv6 traffic uses the Go proxy, and loopback traffic gets a dedicated Go fallback. The Web UI reports this as a hybrid data plane.
+Signing identity: `portbridge-release-v2`. Signature namespace: `portbridge-release`. A signature establishes integrity and origin relative to the trusted key, not that a deployment is vulnerability-free. Version `2.4.9` is deliberately pinned; use the matching instructions and trust material when upgrading.
 
-## Requirements
+Do not edit files inside the verified package before installation, including its README files. Those files are covered by the internal signed manifest. Repacking or modifying a release requires regenerated manifests, checksums and publisher signatures.
 
-- Linux with systemd, nftables, conntrack, iproute2, OpenSSH `ssh-keygen`, GNU shell/file/text/account utilities, and util-linux `runuser`. Flowtable can be disabled when it is not supported.
-- Root access for installation.
-- Exactly Go 1.27.1 when building from source or producing release binaries.
 
-Each Release package contains one architecture-specific binary, localized GUI, installer and documentation, with source included for inspection. Installing it does not require Go.
+### 3. Open the Web GUI
 
-Compatibility history: the preceding release was validated on Debian 13 and Ubuntu 26.04. v2.4.9 was validated on Debian 13; Ubuntu was not revalidated for this version. Other compatible Linux distributions can be tested independently. The installer uses apt-get when nftables or conntrack is missing; non-APT systems must install both first.
-
-## Fresh-install defaults
-
-These are the values produced by the installer when no configuration exists:
-
-| Item | Default in v2.4.9 |
-|---|---|
-| Management endpoint | HTTPS on TCP `9080`, listening on `127.0.0.1` and `::1` |
-| Forwarding rules | Empty (`rules: []`); no forwarding port is opened automatically |
-| New-rule Web form | TCP, `nftables preferred`, wildcard `*`; supply the listen port, target host and target port |
-| Management ACL | Automatic LAN discovery off, strict mode off, persistent whitelist empty; loopback remains accessible |
-| TLS | HTTPS required; minimum TLS `1.2`, optionally `1.3`; generate a ten-year self-signed certificate only when no pair is configured |
-| DNS | No custom resolver; use system DNS; domain targets re-resolved every `30` seconds |
-| Monitoring | Serialized status polling every `500 ms` |
-| Global Go-proxy budgets | `8192` TCP connections, `16384` UDP sessions, `1 GiB` estimated UDP memory |
-| nftables | Flowtable enabled; a fresh installation generates a nonzero instance conntrack mark |
-
-`config.example.json` is an example, not the configuration installed by the script. Its enabled sample rule, documentation-only targets, `443–452` port range and custom DNS entries are examples; review or remove them before using that file. `config.public.example.json` is a public-management template. Neither is automatically installed as live configuration.
-
-Management port `9080` is independent of forwarding ports. Only explicitly configured rules open forwarding endpoints. Upgrades retain the existing management port, listeners and rules while enforcing HTTPS.
-
-## First installation using prebuilt Release packages
-
-This procedure is for a Linux host without an existing PortBridge installation. Back up configuration and plan a maintenance window for existing instances instead. Prepare Bash, curl, CA certificates, tar/gzip, sha256sum, awk, OpenSSH `ssh-keygen`, systemd and the system dependencies listed above. Go is not required. In a root shell, omit `sudo` from the commands below.
-
-### 1. Select the architecture and download the English package
-
-Run on the target server. `x86_64` maps to amd64; `aarch64`/`arm64` maps to arm64. The commands select automatically. Assets are `portbridge-v2.4.9-linux-amd64-en-US.tar.gz` and `portbridge-v2.4.9-linux-arm64-en-US.tar.gz` on the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9). Do not choose GitHub-generated Source code archives: they contain no prebuilt binary. Run the following steps sequentially in the same Bash session.
+By default, management listens on **HTTPS port 9080 at `127.0.0.1` and `::1` only**. It is not exposed to the Internet. On your administrator computer, replace `USER` and `SERVER` with your SSH login and server address, then keep this tunnel running:
 
 ```bash
-set -euo pipefail
-case "$(uname -m)" in
-  x86_64) PB_ARCH=amd64 ;;
-  aarch64|arm64) PB_ARCH=arm64 ;;
-  *) echo 'Unsupported architecture' >&2; exit 1 ;;
-esac
-PB_LANG='en-US'
-PB_NAME="portbridge-v2.4.9-linux-${PB_ARCH}-${PB_LANG}"
-PB_URL='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.4.9'
-PB_WORK=$(mktemp -d)
-cd "$PB_WORK"
-curl -q -fL --proto '=https' --proto-redir '=https' -o "$PB_NAME.tar.gz" "$PB_URL/$PB_NAME.tar.gz"
-for PB_FILE in SHA256SUMS SHA256SUMS.sig SBOM; do
-  curl -q -fL --proto '=https' --proto-redir '=https' -H 'Cache-Control: no-cache' \
-    -o "$PB_FILE" "$PB_URL/$PB_FILE?release=binary-v2.4.9"
-done
-curl -q -fL --proto '=https' --proto-redir '=https' -o release-signers \
-  'https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/c54d27252e5e76fe76eaf8a3c63f37cab304eb40/packaging/release-signers'
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:9080:127.0.0.1:9080 USER@SERVER
 ```
 
-The signer file is downloaded from a fixed source commit; independently confirm the expected fingerprint below before trusting it. A key obtained alongside an archive is not independent proof of identity. If a same-name checksum asset is cached from an older release, fetch the current file again; never bypass verification.
+Open **https://127.0.0.1:9080/** in your browser. If the installer generated a self-signed certificate, verify its SHA-256 fingerprint from the server's installation output and establish client trust before logging in. Do not blindly bypass certificate warnings.
 
-### 2. Verify and install
-
-Verify the Ed25519 signature on SHA256SUMS before selecting the archive and SBOM hashes from that trusted list. The other three packages need not be downloaded. Stop on any failure. The current Release has no per-archive `.tar.gz.sig` or separate `release-signers` asset.
-
-```bash
-PB_EXPECTED_FP='SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o'
-test "$(ssh-keygen -lf release-signers -E sha256 | awk '{print $2}')" = "$PB_EXPECTED_FP"
-ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
-awk -v file="$PB_NAME.tar.gz" '$2 == file || $2 == "SBOM" { print; n++ } END { if (n != 2) exit 1 }' SHA256SUMS > selected-SHA256SUMS
-sha256sum -c selected-SHA256SUMS
-tar -xzf "$PB_NAME.tar.gz"
-cd "$PB_NAME"
-test "$(./dist/go-nftables-portbridge-linux-$PB_ARCH -version)" = '2.4.9'
-sudo ./scripts/install.sh
-```
-
-The installer uses the bundled binary for the current architecture, checking the pinned key, signed internal manifest, source/script hashes, binary hash and version before installation. No Go compiler is required. Do not remove `dist/` or bypass verification. Installation creates the service account, deploys the systemd unit, enables forwarding and starts the service. Missing nftables/conntrack dependencies are installed with apt-get; non-APT systems must prepare them first.
-
-Without supplied TLS material, the installer generates a ten-year self-signed certificate and requires HTTPS. To use existing material, replace the last command with `sudo ./scripts/install.sh --tls-cert /absolute/path/fullchain.pem --tls-key /absolute/path/privkey.pem`, using real server-local paths. Do not overwrite live configuration with example files.
-
-### 3. Confirm service health and access management
-
-```bash
-systemctl is-active portbridge
-systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
-/usr/local/bin/portbridge -version
-sudo journalctl -u portbridge -n 50 --no-pager
-```
-
-Confirm `active/running`, version `2.4.9` and no repeated restarts. Investigate logs on failure; do not disable HTTPS or permit all IPs. Logs may contain runtime details and must be redacted before sharing. Fresh installations have no forwarding rules: create rules after login and validate real TCP/UDP traffic. ARM64 packages received QEMU user-mode checks, not native ARM64 systemd/kernel acceptance.
-
-Run the SSH tunnel command below on your administrator computer, replacing `SERVER` with the server address. If local port 9080 is occupied, change the first tunnel port and use that port in the browser URL.
-
-The secure default binds management only to loopback. Open an SSH tunnel:
-
-```bash
-ssh -L 9080:127.0.0.1:9080 root@SERVER
-```
-
-Then open `https://127.0.0.1:9080/` locally. When a self-signed certificate is generated, verify the installation fingerprint and establish client trust first. HTTPS does not change the default loopback listener or the IP allowlist.
-
-The installer does not print the administrator token by default, so unattended deployment logs do not capture it. It is stored with restricted permissions at:
+On the **server**, read the administrator token in a private terminal:
 
 ```bash
 sudo cat /etc/portbridge/admin.token
 ```
 
-If startup reports an inconsistent or missing token file, stop the service before
-resetting the token as its service account, then restart. This preserves file
-ownership and reloads the new credential into the running process:
+Use that token to sign in. It is not printed during a normal installation. Never put it in screenshots, issue reports or deployment logs. If local port 9080 is occupied, change the first `9080` in the tunnel command and use the corresponding local browser port.
 
-```bash
-sudo systemctl stop portbridge
-sudo -u portbridge /usr/local/bin/portbridge --config=/etc/portbridge/config.json --token-file=/etc/portbridge/admin.token --reset-admin-token
-sudo systemctl start portbridge
-```
+## Create your first forwarding rule
 
-The reset command prints the new secret; use a private terminal. For custom
-deployments, use the same configuration/token paths and account as the service.
+In the Web GUI, add a rule with a protocol, listen address/port, target host/port and data-plane preference. Save it, check its **actual runtime state**, then test traffic from a client that should be allowed to use the forwarding port.
 
-For an interactive installation, pass `--show-token` only when printing the token to the terminal is acceptable. The supported installer options are:
-
-| Option | Purpose |
+| Forwarding direction | Data-plane behavior |
 |---|---|
-| `--allow IP/CIDR[,more]` | Add temporary bootstrap ACL entries; it does not change the Web listen address or bypass TLS |
-| `--tls-cert FILE` / `--tls-key FILE` | Import a certificate/key pair into the managed TLS directory |
-| `--tls-name DNS-or-IP` | Add a SAN when generating a new self-signed certificate; repeatable |
-| `--no-start` | Prepare files, required HTTPS and the administrator token, but leave the service stopped |
-| `--show-token` | Print the token after startup; avoid it in captured deployment logs |
+| IPv4 → IPv4 / IPv6 → IPv6 | Eligible traffic can use nftables; select `GO` to explicitly use the proxy. |
+| IPv4 → IPv6 / IPv6 → IPv4 | Uses the Go TCP/UDP proxy. |
+| Wildcard `*` listener | Plans IPv4 and IPv6 separately; may use a hybrid data plane with dedicated Go loopback handling. |
 
-When upgrading or recovering a configuration that already has a non-loopback listener, a temporary bootstrap ACL can be supplied:
+For port ranges, `10000–10009 → 20000–20009` maps ports one-to-one. The two ranges must have equal lengths, with at most 4096 ports. For private destinations, explicitly set **both** `allow_private_target=true` and a narrow `target_cidr_allowlist`; do not disable target checks broadly.
 
-```bash
-sudo ./scripts/install.sh --allow 203.0.113.10/32
-```
+A fresh installation does not load [config.example.json](config.example.json). It contains demonstration rules and targets, not ready-to-use production defaults. Configure your own endpoints and permit only the required forwarding traffic in your host/cloud firewall.
 
-Multiple IPv4/IPv6 prefixes are accepted as a comma-separated list. `--allow` does not make a fresh loopback-only installation remotely reachable. It is only a recovery/bootstrap permission, not a substitute for TLS or a host firewall, and strict allowlist mode deliberately ignores it.
+**Validate the data path:** an `active` systemd service does not prove that a rule is forwarding. Check the Web rule status and test real TCP and, when enabled, UDP request/response traffic. A UDP port probe alone is not an end-to-end application test. Firewall conflicts can keep a rule suspended even while management is healthy.
 
-For a clean source checkout without prebuilt binaries in `dist/`, install exactly Go 1.27.1 and run the same installer. Go must be visible in the installer's fixed PATH (`/usr/local/go/bin` or a standard system binary directory), not only in your personal shell PATH. Builds use vendored dependencies:
+## Configuration and API
 
-```bash
-go version  # must report go1.27.1
-sudo ./scripts/install.sh
-```
-
-## HTTPS certificates and replacement
-
-Installation and upgrades set `web.require_https=true`, disable `allow_insecure_http`, and provision TLS before the service starts (including `--no-start`). The systemd service also requires HTTPS. The settings API cannot clear certificates or re-enable plaintext HTTP.
-
-If no certificate is configured, the installer generates a unique ECDSA P-256 self-signed certificate valid for ten years. SANs include localhost, loopback addresses, the current machine hostname and unicast interface IPs. For an additional management DNS name or externally mapped IP, use `--tls-name admin.example.com` or `--tls-name 203.0.113.10` during the initial generation. Existing valid certificates are preserved on upgrades; invalid, expired or incomplete configured certificates stop installation instead of triggering a silent replacement. IP/name changes require a replacement certificate if the new name is not in its SANs.
-
-Self-signed TLS encrypts traffic but is not automatically trusted by browsers. Verify the SHA-256 fingerprint printed in the server's installation output through a trusted channel, then import the public certificate into your client's trust store. Never distribute the private key or blindly bypass certificate warnings. Installation output and the Web page explicitly identify self-signed certificates; the Web status describes the certificate actually loaded by the process.
-
-To supply a regular certificate/key pair during installation or upgrade:
-
-```bash
-sudo ./scripts/install.sh --tls-cert /secure/fullchain.pem --tls-key /secure/privkey.pem
-```
-
-The pair must match, be currently valid, use absolute non-symlink paths, and satisfy the key-owner/permission checks. The installer copies explicit imports into a new managed directory under `/etc/portbridge-tls`, without changing the originals. Generated/imported keys are root-owned with read-only access for the service group (`0640`).
-
-Later, put a CA-issued certificate and matching key on the server, ensure the service can read the files and parent directories (for example `root:portbridge 0640` for the key), enter their absolute paths in Web access settings, save, and run `sudo systemctl restart portbridge`. Certificate renewal at the same path also needs a restart. A reverse proxy must use HTTPS to the installed backend and verify the backend certificate/hostname; it still must enforce the real-client allowlist.
-
-## Public management deployment
-
-The installed service uses loopback-only HTTPS, disables automatic LAN discovery, and therefore is not remotely reachable. Do not weaken that default for Internet exposure.
-
-For direct public management, use [config.public.example.json](config.public.example.json) as a reference and apply all of these controls:
-
-1. Restrict TCP/9080 to the exact administrator IPs in the cloud security group and host firewall. The application ACL is defense in depth, not volumetric DoS protection.
-2. Use a certificate valid for the management IP/domain and establish client trust. For direct Web replacement, the service must be able to read the key: use `0600` owned by `portbridge`, or `0640 root:portbridge`, and allow traversal of parent directories.
-3. Set the absolute `web.tls_cert_file` and `web.tls_key_file` paths, restart the service, and verify HTTPS first.
-4. From that HTTPS session, disable `web.auto_lan_acl`, add the direct client address to `web.whitelist`, and enable `web.strict_ip_allowlist`.
-
-The Web UI enforces this two-stage transition: strict mode cannot be enabled from a plaintext HTTP session. A new installation may instead prepare all fields offline while the service is stopped, then start directly in strict HTTPS mode. Replace the documentation-only addresses in the public example before using it. Certificate renewal at the same path still requires `systemctl restart portbridge`.
-
-Strict mode always permits local loopback recovery, but otherwise uses only the persistent whitelist. It ignores automatically detected LANs and `--bootstrap-allow`, rejects `0.0.0.0/0` and `::/0`, and accepts at most 1024 whitelist entries. TLS 1.2 is the minimum by default; set `web.tls_min_version` to `1.3` (and restart) for internet-exposed management. TLS responses include HSTS.
-
-PortBridge never trusts `Forwarded` or `X-Forwarded-For`. If a reverse proxy terminates TLS, bind PortBridge to loopback/private addresses and enforce the real client allowlist at the proxy and firewall. PortBridge sees only the proxy's directly connected address; the native strict mode is intended primarily for direct TLS connections.
-
-## Data-plane selection
-
-Each rule has two choices:
-
-- `nftables preferred` (default): same-family forwarding uses kernel DNAT/SNAT; established external TCP/UDP flows are eligible for the `fastpath` flowtable. Cross-family paths and wildcard loopback fallback use Go.
-- `GO`: the whole rule uses the Go TCP/UDP proxy.
-
-The controller validates the real owner of its own `inet portbridge` table. Ordinary updates retain flowtable objects; disabling acceleration removes them but preserves NAT. Old forwarding requires exact conntrack retirement, not merely table deletion. Failures retain risk/tombstone state and block overlapping replacements. Read [forwarding limits](docs/forwarding-limits.md) for recovery, firewall and manual NAT-only limits.
-
-## Protocols and port ranges
-
-`protocol` accepts `tcp`, `udp`, or `both`. A `both` rule starts TCP and UDP forwarding on the same endpoint.
-
-Listen and target ranges must have equal lengths and may contain up to 4096 ports:
-
-```text
-Listen: 10000-10099
-Target: 20000-20099
-```
-
-This maps `10000 → 20000`, `10001 → 20001`, and so on. The nftables path uses a deterministic destination-port map instead of a NAT port pool.
-
-## DNS and DDNS-style target refresh
-
-The Web settings page accepts up to eight custom DNS servers, one per line:
-
-```text
-1.1.1.1
-8.8.8.8:53
-[2606:4700:4700::1111]:53
-```
-
-Port `53` is used when omitted. Leaving the list empty uses the system resolver. DNS traffic itself is plaintext unless the selected local/system resolver provides encrypted upstream transport. Domain targets are resolved every 30 seconds. Every resolved address is revalidated on every refresh to prevent DNS rebinding into denied local, private, link-local, multicast, unspecified, carrier-grade NAT, or cloud-metadata destinations. Private targets require both `allow_private_target=true` and an explicit narrow `target_cidr_allowlist`. Address changes atomically update nftables rules and restart only affected Go paths; a temporary DNS failure retains the last valid target.
-
-## Local-process access
-
-- A local process connecting to a non-loopback forwarded address is handled by the nftables `output` chain.
-- For wildcard listeners, `127.0.0.1` and `::1` use dedicated Go fallback listeners.
-- The service does not enable `route_localnet`.
-
-## Configuration
-
-The live configuration is `/etc/portbridge/config.json`. [config.example.json](config.example.json) demonstrates fields and rules; it is not a dump of fresh-install defaults.
-
-Connection/session/rate/estimated-memory limits below apply to Go proxy paths. They do not automatically rate-limit the nftables/flowtable path; enforce any required kernel-path limits separately with firewall/kernel controls. Management ACLs also do not protect forwarding endpoints.
-
-Important fields:
-
-| Field | Description |
+| Item | Location / behavior |
 |---|---|
-| `web.port` | Web management port; restart required after a change |
-| `web.listen_ipv4` / `listen_ipv6` | Web listen addresses |
-| `web.auto_lan_acl` | Automatically allow directly attached private/ULA/link-local prefixes |
-| `web.strict_ip_allowlist` | Direct-public mode: require native TLS and use only loopback plus the explicit whitelist |
-| `web.require_https` | Set by installation; certificates are mandatory and API downgrades are rejected |
-| `web.allow_insecure_http` | Legacy development compatibility only; installed services reject enabling it |
-| `web.whitelist` | Explicit IP/CIDR management ACL |
-| `web.tls_cert_file` / `tls_key_file` | Absolute native-TLS certificate/key paths; restart after a change |
-| `web.tls_min_version` | `1.2` (default) or `1.3`; restart after a change |
-| `web.dns_servers` | Custom DNS servers; empty means system resolver |
-| `resource_limits.*` | Global TCP connection, UDP session, and estimated UDP-memory ceilings |
-| `nftables.conntrack_mark` | Nonzero instance mark used to scope all managed NAT/forward rules |
-| `nftables.enable_flowtable` | Enable the optional nftables flowtable fast path |
-| `rules[].protocol` | `tcp`, `udp`, or `both`; the new-rule Web form selects TCP and enabled by default |
-| `rules[].data_plane` | `nftables` or `go` |
-| `rules[].listen_port_end` / `target_port_end` | Optional equal-length range ends |
-| `rules[].allow_private_target` / `target_cidr_allowlist` | Two-part opt-in for narrowly allowed private targets |
-| `rules[].tcp_idle_timeout_seconds` | Close inactive TCP proxies; default `300` seconds |
-| `rules[].max_tcp_connections` / `max_tcp_connections_per_source` | Rule and source limits; defaults `2048` / `256` |
-| `rules[].max_udp_sessions` / `max_udp_sessions_per_source` | Exact rule-wide and source-IP-wide session limits across every worker, port, family, and Go runner; defaults `4096` / `512` |
-| `rules[].udp_new_sessions_per_second_per_source` | Exact rule-wide source-IP session-creation rate shared by every Go path; default `1000`/s |
-| `rules[].udp_packets_per_second_per_source` | Exact rule-wide source-IP packet rate shared by every Go path; default `100000`/s |
-| `rules[].udp_workers` | Rule-wide worker budget; `0` selects an automatic value |
-| `rules[].udp_batch_size` | `ReadBatch`/`WriteBatch` size; default `64` |
-| `rules[].udp_packet_buffer_size` | Preallocated packet-buffer size; default `2048` bytes |
-| `rules[].udp_listener_buffer_bytes` | Requested listener socket buffer; default `4 MiB` |
-| `rules[].udp_session_buffer_bytes` | Requested connected-session socket buffer; default `64 KiB` |
+| Installed executable | `/usr/local/bin/portbridge` |
+| Service | `portbridge.service` |
+| Live configuration | `/etc/portbridge/config.json` |
+| Administrator token | `/etc/portbridge/admin.token` |
+| Installer-managed TLS material | `/etc/portbridge-tls/` |
+| Rule, ACL and DNS edits | Applied without a service restart. |
+| Management listener, port or TLS edits | Require `sudo systemctl restart portbridge`. |
 
-Rule, ACL, and DNS changes are applied without restarting the service. Web listen address, port, TLS path, or TLS minimum-version changes require a restart. Enabling strict mode is immediate and is accepted only through an existing HTTPS session whose direct client address remains whitelisted.
+The [English API reference](docs/API.en-US.md) covers authentication, configuration, rules, settings and runtime status. Management requests require Bearer authentication; write operations additionally require CSRF handling. Follow the API documentation rather than treating the service as an unauthenticated REST endpoint.
 
-Saving settings without `tls_min_version` (or with an empty value) preserves the
-configured TLS policy for older API clients; explicitly send `1.2` to restore the
-default. `restart_required` remains true across repeated saves until the running
-listener matches the saved configuration after restart, or the change is reverted.
+Keep loopback-only access and the SSH tunnel unless direct management access is necessary. For public management, configure valid native TLS, an explicit strict IP allowlist and a restrictive host/cloud firewall. `--allow` is a temporary bootstrap ACL option; it does **not** change the default loopback listener. ACL decisions use the direct TCP peer, not `X-Forwarded-For`, so reverse proxies must enforce the real-client allowlist themselves. See [SECURITY.md](SECURITY.md) and [the public-management example](config.public.example.json).
 
-## Performance design
+### Use an existing HTTPS certificate
 
-- Linux TCP fast path uses `net.TCPConn.ReadFrom`, allowing the runtime to use `splice`; the fallback uses pooled 64 KiB buffers and preserves half-close behavior.
-- UDP workers own their socket, packet slab, batch messages, `netip.AddrPort` flow table, epoll state, time wheel, and counters.
-- Linux batch I/O uses `recvmmsg`/`sendmmsg` through `ReadBatch`/`WriteBatch`.
-- `SO_REUSEPORT` distributes flows across worker-local sockets. Session lookup remains worker-local; exact source-IP limits use 64 shared rule-level shards, so each inbound packet holds only one short counter/token-bucket lock and never holds it across socket I/O.
-- Connected UDP upstream sockets filter the remote peer and avoid per-packet target-address work.
-- The hot path avoids per-packet goroutines, channels, JSON, database work, and logging.
-- Global and per-rule/source budgets reject excess TCP/UDP state before it can create unbounded file-descriptor or memory growth. UDP listener slabs and connected-session buffers share the global estimated-memory ceiling.
-
-See [docs/udp-dataplane.md](docs/udp-dataplane.md) for the detailed design and tuning notes.
-
-## Service operations
+In the verified release directory, supply a currently valid matching certificate/key pair using absolute server-local paths:
 
 ```bash
-sudo systemctl status portbridge
-sudo journalctl -u portbridge -f
-sudo systemctl restart portbridge
-sudo nft list table inet portbridge
-sudo nft list flowtable inet portbridge fastpath  # only when enable_flowtable=true
+sudo ./scripts/install.sh --tls-cert /absolute/path/fullchain.pem --tls-key /absolute/path/privkey.pem
 ```
 
-The public project name is `Go-nftables-portbridge`. The installed binary, service, configuration directory, and nftables table intentionally retain the `portbridge` identifier for upgrade compatibility.
+For a fresh install, use these options on the installer invocation in step 2 rather than running the default installation first. Imported material is copied into the managed TLS directory; the originals are not modified. Source paths must satisfy the installer's ownership, permission and non-symlink checks. Existing valid certificates are preserved during upgrades; invalid configured material causes installation to stop.
 
-## Security notes
+Run `./scripts/install.sh --help` in the release directory for all options. `--no-start` prepares files and credentials without starting the service; skip the quick-start `systemctl is-active` check when intentionally using it. Avoid `--show-token` in captured logs.
 
-- The management API uses a random 256-bit bearer token, authenticated CSRF bootstrap, same-origin browser checks, and bounded JSON bodies. Repeated failures are throttled per IP and globally; a valid token is never locked out by failed attempts.
-- Installed services require HTTPS. Missing certificates are generated per machine, and self-signed certificate status/fingerprints are clearly displayed.
-- The browser keeps the token in per-tab `sessionStorage`, not persistent `localStorage`; closing the tab clears it, and logout/authentication loss clears management data from the page. Treat any system with browser extensions or injected scripts as outside the trust boundary.
-- ACL decisions use the direct TCP peer address and do not trust `X-Forwarded-For`.
-- Strict mode filters disallowed peers before TLS handshakes/HTTP parsing, repeats the ACL check in middleware, and caps accepted management connections. An upstream firewall is still required for Internet exposure.
-- The configuration and administrator token are stored with mode `0600`; TLS private keys reject symlinks, unsafe ownership, and broad permissions. The systemd unit disables core dumps, filters dangerous system-call groups, and applies file-descriptor, task, CPU, and memory ceilings.
-- New target selection, including cached DNS during outages, revalidates current authorization. Existing kernel-flow revocation remains subject to the documented forwarding limits.
-- The current Release uses signed SHA256SUMS for the four prebuilt archives and SBOM, plus signed internal manifests binding binaries and source/scripts. Installers retain the pinned verification chain.
-- Default startup logs omit rule names and forwarding endpoints. Debug and error logs can still contain operational network details and must be protected.
-- Never commit `/etc/portbridge/config.json`, `/etc/portbridge/admin.token`, logs, database files, or environment files.
 
-See [SECURITY.md](SECURITY.md) for reporting guidance.
-
-## Build and test
-
-Dependencies are committed under `vendor/`, including the documented local batch-address reuse patch, so builds can run offline:
+## Operations and troubleshooting
 
 ```bash
-go version              # must report go1.27.1
+systemctl show portbridge -p ActiveState -p SubState -p Result -p NRestarts
+sudo journalctl -u portbridge -n 50 --no-pager
+```
+
+Expect `ActiveState=active`, `SubState=running`, and no ongoing restart loop. Inspect logs when a service or rule is unhealthy; do not disable HTTPS, erase ownership/recovery records or open the management allowlist to work around a failure. Redact tokens and operational details before sharing logs. For nftables-path inspection, use `sudo nft list table inet portbridge`; Go-proxy Web counters are not kernel-path counters.
+
+## Upgrade and uninstall
+
+Before an upgrade, securely back up `/etc/portbridge/` and `/etc/portbridge-tls/`, and plan a maintenance window. Download and verify the target release, then run **that release's installer**. It preserves existing configuration and rules while enforcing HTTPS, but stops/restarts the service; upgrades are not promised to be interruption-free. Never replace your live configuration with an example file.
+
+For uninstalling, use the script from a verified release directory:
+
+```bash
+sudo ./scripts/uninstall.sh
+```
+
+This keeps configuration. Adding `--purge` also removes configuration and the service account; use it only when those are no longer needed. `/etc/portbridge-tls/` is intentionally retained. The quick start prints its extracted package directory, which is temporary and may later be cleaned by the OS; retain a verified copy for maintenance or download and verify it again.
+
+## Development and documentation
+
+Source builds require **exactly Go 1.27.1**. Dependencies are vendored. From a source checkout, run:
+
+```bash
 GOPROXY=off go test ./...
 GOPROXY=off go test -race ./...
 GOPROXY=off go vet ./...
 make dist
 ```
 
-v2.4.9 is built with Go 1.27.1 and uses `http.Server.MaxHeaderValueCount` together with byte limits. No public `pprof` endpoint is enabled. `make dist` creates unsigned development binaries, not a signed release: the installer intentionally rejects prebuilt files without the required signatures. Do not treat that output as an installable Release or bypass verification.
+`make dist` produces unsigned development binaries, **not installable signed Release packages**. Do not bypass the installer's signature checks to install them.
 
-## Release signatures versus source builds
+[API reference](docs/API.en-US.md) · [Forwarding limits](docs/forwarding-limits.md) · [UDP design and tuning](docs/udp-dataplane.md) · [Release notes](RELEASE_NOTES.md) · [Contributing](CONTRIBUTING.md)
 
-The current Release contains four `portbridge-v2.4.9-linux-{amd64,arm64}-{en-US,zh-CN}.tar.gz` assets, `SHA256SUMS`, `SHA256SUMS.sig` and a CycloneDX 1.6 JSON `SBOM`. Verify the signed checksum file against the trusted release key, then verify the selected archive and SBOM hashes, as shown in the first-install tutorial.
+## Contributing and license
 
-Each internal `release-bundle-manifest.json.sig` authenticates metadata binding the version, source revision, Go toolchain, architecture and binary/source hashes. Signing identity: `portbridge-release-v2`; namespace: `portbridge-release`; pinned fingerprint: `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`.
+Bug reports, documentation improvements and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), and follow [SECURITY.md](SECURITY.md) for security reports. If PortBridge is useful to you, a GitHub star helps others discover the project.
 
-Git checkouts, GitHub-generated Source code archives and local `go build`/`make dist` outputs do not automatically acquire these release signatures. Signatures authenticate exact artifact origin and integrity, not absence of vulnerabilities or suitability for every production environment. Modified archive bytes require new checksums and signatures.
-
-## Uninstall
-
-Keep configuration:
-
-```bash
-sudo ./scripts/uninstall.sh
-```
-
-Remove configuration and the service account too:
-
-```bash
-sudo ./scripts/uninstall.sh --purge
-```
-
-The separate `/etc/portbridge-tls` directory is intentionally retained so an
-uninstall cannot silently destroy certificates or private keys.
-
-## License
-
-[MIT](LICENSE)
+Released under the [MIT License](LICENSE).

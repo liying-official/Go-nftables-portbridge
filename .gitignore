@@ -38,3 +38,6 @@ coverage.out
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local CI evidence is never source-controlled
+/ci-evidence/

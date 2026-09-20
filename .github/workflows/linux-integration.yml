@@ -1,0 +1,103 @@
+name: Linux nftables integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27.1"
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=vendor
+  GOWORK: "off"
+  GOPROXY: "off"
+  GOSUMDB: "off"
+  GOENV: "off"
+
+jobs:
+  nftables:
+    name: nftables / netns / flowtable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.27.1"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install kernel-test prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            conntrack \
+            iproute2 \
+            nftables \
+            openssh-client \
+            python3 \
+            util-linux
+
+      - name: Verify required tools and Go version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go version)" = "go version go1.27.1 linux/amd64"
+          for command in unshare ip nft conntrack mount sysctl setpriv python3 ssh-keygen; do
+            command -v "$command"
+          done
+
+      - name: Probe isolated nftables capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/unshare --net /bin/bash -ceu '
+            /usr/sbin/ip link set lo up
+            trap "/usr/sbin/nft delete table inet pb_ci_probe >/dev/null 2>&1 || true" EXIT
+            /usr/sbin/nft add table inet pb_ci_probe
+            /usr/sbin/nft add chain inet pb_ci_probe input "{ type filter hook input priority 0; policy accept; }"
+            /usr/sbin/nft list table inet pb_ci_probe
+          '
+
+      - name: Run v2.4.9 kernel integration verification
+        shell: bash
+        env:
+          PB_CI_LOG_DIR: ${{ github.workspace }}/ci-evidence
+        run: |
+          set -euo pipefail
+          go_bin="$(command -v go)"
+          sudo \
+            PB_CI_LOG_DIR="$PB_CI_LOG_DIR" \
+            /bin/bash ./scripts/ci-linux-integration.sh "$go_bin"
+
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux-nftables-integration-evidence
+          path: |
+            ci-evidence/*.log
+            ci-evidence/*.exit
+            ci-evidence/*.stdout
+            ci-evidence/*.stderr
+          if-no-files-found: warn
+          retention-days: 7
