@@ -13,6 +13,8 @@ PortBridge combines nftables DNAT/SNAT and optional **software flowtable** accel
 
 [Install](docs/INSTALL.en-US.md) · [API reference](docs/API.en-US.md) · [All documentation](docs/INDEX.md) · [Releases](https://github.com/liying-official/Go-nftables-portbridge/releases)
 
+[Try the WebUI demo](https://liying-official.github.io/Go-nftables-portbridge/) — public demo password: **`PortBridge`**. All data is simulated in your browser; no real forwarding or management API is connected. Do not enter real credentials. See [demo boundaries](docs/DEMO.md).
+
 This documentation describes **v2.5.0**. The live release badge and interactive installer may point to a different published version; use the documentation matching the package you deploy.
 
 ## Features

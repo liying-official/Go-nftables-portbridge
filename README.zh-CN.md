@@ -13,6 +13,8 @@ PortBridge 将适用于符合条件流量的 nftables DNAT/SNAT、可选的 **so
 
 [安装指南](docs/INSTALL.zh-CN.md) · [API 文档](docs/API.zh-CN.md) · [完整文档](docs/INDEX.md) · [发布版本](https://github.com/liying-official/Go-nftables-portbridge/releases)
 
+[体验 WebUI 演示](https://liying-official.github.io/Go-nftables-portbridge/?lang=zh-CN) — 公开演示密码：**`PortBridge`**。数据仅在浏览器内模拟，不连接真实管理 API，也不转发流量；请勿输入真实凭据。详见[演示边界](docs/DEMO.md)。
+
 本文档适用于 **v2.5.0**。动态版本徽章和交互式安装器可能指向其他已发布版本；部署时应使用与所选发布包匹配的文档。
 
 ## 主要功能

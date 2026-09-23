@@ -9,6 +9,7 @@ Documentation for v2.5.0. Use the guides matching the version you install. / 本
 | Topic / 主题 | English | 简体中文 |
 |---|---|---|
 | Overview / 项目首页 | [README](../README.md) | [README](../README.zh-CN.md) |
+| Static WebUI demo / 静态界面演示 | [Demo and boundaries](DEMO.md) | [演示与边界](DEMO.md) |
 | Verified installation, operations, upgrades / 验签安装与运维升级 | [Installation](INSTALL.en-US.md) | [安装指南](INSTALL.zh-CN.md) |
 | Interactive fresh installer / 交互式全新安装 | [One-click](ONECLICK.en-US.md) | [一键安装](ONECLICK.zh-CN.md) |
 | HTTP API and client examples / HTTP API 与客户端示例 | [API](API.en-US.md) | [API](API.zh-CN.md) |

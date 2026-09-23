@@ -26,6 +26,20 @@ env:
   GOENV: "off"
 
 jobs:
+  pages-demo:
+    name: Static Pages demo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check generated demo assets
+        run: python3 scripts/build-pages-demo.py --check
+      - name: Test browser-local simulation
+        run: node scripts/test-pages-demo.mjs
+
   quality:
     name: Vet and unit tests
     runs-on: ubuntu-24.04

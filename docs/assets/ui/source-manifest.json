@@ -1,0 +1,15 @@
+{
+  "version": "2.5.0",
+  "sources": {
+    "index.html": "0c13c76a38ef3140c64d7159c7f07c61535634e8b40d9955830144118c48696c",
+    "app.js": "f8411ebfef74a1f7857a3875b7c99c9420ef3b336a52cab3d00f0899ab7e92d4",
+    "i18n.js": "1293989bd2ede83038567fa141021db4df93b0e828fec33c9a9674b3ce6e9627",
+    "style.css": "67c161cd323fb4f531995c0eb6ea5bdd1de36a3d3630e0f78ffe31776e345cfc",
+    "security.css": "61a8ec34e4cc055eb28d2721822ced97c52195ab63826c4162cff445f717c6d1",
+    "tabler-icons.svg": "1e918329057a7a20c24da0d2365fb01ce0168307ca3410bb5142a87aa51d4984",
+    "vendor/tabler.min.css": "6aa5677e9cfc2620405bf97a98074ba43ff06a411cb35c5337acfb56d124c273",
+    "vendor/tabler.min.js": "d4c4c2768f166c308391e0cea44db593056f12b84a4eeef46d55e35ca46d6e60",
+    "vendor/LICENSES.txt": "e5356c5699c5a17e8778f905cb85003cea857751ca4afeea0b47d6236acac2b4"
+  },
+  "demo_only": true
+}
