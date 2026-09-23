@@ -1,94 +1,69 @@
-# PortBridge — v2.5.0
+<h1 align="center">PortBridge</h1>
 
-**TCP and UDP port forwarding for Linux, with a bilingual Web UI and an authenticated HTTP API.**
+<p align="center">
+  <strong>One interface for TCP/UDP port forwarding across IPv4 and IPv6.</strong>
+</p>
 
-[![Release](https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge)](https://github.com/liying-official/Go-nftables-portbridge/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Linux](https://img.shields.io/badge/platform-Linux-informational)
-![amd64 / arm64](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational)
+<p align="center">
+  <a href="https://github.com/liying-official/Go-nftables-portbridge/releases"><img src="https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge" alt="GitHub Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Platform: Linux">
+  <img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational" alt="Architecture: amd64 / arm64">
+</p>
 
-**English** | [简体中文](README.zh-CN.md)
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-PortBridge combines nftables DNAT/SNAT and optional **software flowtable** acceleration for eligible traffic with a Go TCP/UDP proxy for cross-family and explicitly selected proxy paths. Manage rules, inspect runtime state and rotate the administrator token without leaving the browser.
+<p align="center">
+  <a href="docs/INSTALL.en-US.md">Get started</a> ·
+  <a href="docs/API.en-US.md">API reference</a> ·
+  <a href="DOCUMENTATION_INDEX.md">Documentation</a> ·
+  <a href="https://github.com/liying-official/Go-nftables-portbridge/releases">Download</a>
+</p>
 
-[Install](docs/INSTALL.en-US.md) · [API reference](docs/API.en-US.md) · [All documentation](docs/INDEX.md) · [Releases](https://github.com/liying-official/Go-nftables-portbridge/releases)
+**PortBridge is a self-hosted port-forwarding manager for Linux.** It combines **nftables kernel forwarding** with a **Go TCP/UDP proxy**, offering an English/Chinese Web UI and an authenticated API for port mapping, service forwarding and connections across IPv4/IPv6 networks.
 
-[Try the WebUI demo](https://liying-official.github.io/Go-nftables-portbridge/) — public demo password: **`PortBridge`**. All data is simulated in your browser; no real forwarding or management API is connected. Do not enter real credentials. See [demo boundaries](docs/DEMO.md).
+Create rules, adjust settings and inspect runtime state in your browser, without hand-writing nftables commands for everyday rule management.
 
-This documentation describes **v2.5.0**. The live release badge and interactive installer may point to a different published version; use the documentation matching the package you deploy.
+## Why PortBridge?
 
-## Features
+| Feature | What it gives you |
+| --- | --- |
+| **nftables + Go** | nftables for eligible same-family traffic, optional software flowtable acceleration, and a Go proxy for cross-family forwarding. Explicit Go mode is also available per rule. |
+| **IPv4 / IPv6 in both directions** | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4, managed from the same interface. |
+| **Flexible port mapping** | TCP, UDP or both; single ports and equal-length port ranges covering up to 4096 ports. |
+| **Bilingual Web management** | Create, edit, enable, disable and delete rules, manage settings and rotate the administrator token. UI assets ship with the application, with no external CDN dependency. |
+| **Status, monitoring and automation** | Inspect runtime state and traffic observations, manage rules through an authenticated API, and integrate authenticated Prometheus metrics with your monitoring stack. |
+| **Built-in management controls** | Native HTTPS, administrator tokens, IP/CIDR allowlisting and CSRF checks for API writes. |
 
-| Area | Included in v2.5.0 |
-|---|---|
-| Forwarding | TCP, UDP or both; single ports and equal-length ranges of up to 4096 ports. |
-| Address families | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4. |
-| Data-plane choice | Prefer nftables where eligible, or explicitly use the Go proxy. A wildcard rule can use a hybrid plan. |
-| Management | English / 简体中文 Tabler interface, rule editing, settings and a Bearer-authenticated API with CSRF protection for writes. UI assets are served locally. See the [English API reference](docs/API.en-US.md). |
-| Observability | Runtime state, Go payload counters, separate best-effort nft/conntrack observations and authenticated Prometheus metrics. |
-| Deployment | Signed-release installer, native HTTPS and a dedicated hardened systemd service; release packaging targets Linux amd64 and arm64. |
+## Install
 
-Both localized packages contain the same bilingual interface. The package selects the initial language; the browser stores the language preference in `localStorage` and the administrator token only in per-tab `sessionStorage`.
+Use a **Linux amd64 / arm64** host with **systemd**, **root/sudo** access and the required networking permissions. Prebuilt release packages **do not require Go**.
 
-## Get started
+| Installation guide | When to use it | Management access |
+| --- | --- | --- |
+| **[Release installation and upgrades](docs/INSTALL.en-US.md)** | Install the version pinned in the guide, or upgrade an existing deployment. | Loopback-only HTTPS by default, suitable for management through an SSH tunnel. |
+| **[Interactive fresh installation](docs/ONECLICK.en-US.md)** | Set up a fresh Debian/Ubuntu host with prompts for language, HTTPS port and management allowlist. | Externally bound HTTPS with a strict IP allowlist. |
 
-Choose the installation model deliberately:
+Use the prebuilt asset for your architecture from [Releases](https://github.com/liying-official/Go-nftables-portbridge/releases). Follow the guide to **verify signatures before installation**; GitHub's automatically generated **Source code** archives are not installation packages. The guides cover commands, sign-in, certificate setup and uninstalling.
 
-| Procedure | Management exposure | Use case |
-|---|---|---|
-| **[Verified v2.5.0 release installation](docs/INSTALL.en-US.md)** | HTTPS on `127.0.0.1` / `::1`, port `9080` by default. | Recommended when managing through an SSH tunnel. |
-| **[Interactive fresh installation](docs/ONECLICK.en-US.md)** | HTTPS on `0.0.0.0` and available IPv6 interfaces, protected by a persistent strict IP allowlist. | Debian/Ubuntu; selects the latest published stable release. |
+After installation: **add a forwarding rule → inspect its runtime state → verify that the target service is reachable**. Fresh installations contain no forwarding rules.
 
-Use a Linux host that permits the required networking operations. The service installer requires systemd and administrative privileges; restricted containers are not equivalent. Prebuilt packages do not require a Go compiler. Verify publisher signatures before executing downloaded package scripts; missing signatures are a reason to stop, not bypass verification.
+> This README describes v2.5.0. The interactive installer selects the latest published stable release; use the matching documentation when deploying another version.
 
-After the loopback-only installation, open an SSH tunnel from your administrator computer:
+## Before you deploy
 
-```bash
-ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:9080:127.0.0.1:9080 USER@SERVER
-```
+**The forwarding path depends on the rule and the host.** nftables and software flowtable availability depend on the kernel, networking permissions and existing firewall. An nftables failure does not guarantee automatic Go fallback, and software flowtable is not NIC hardware offload. See [forwarding limits](docs/forwarding-limits.md).
 
-Replace `USER` and `SERVER` with your SSH account and host. Open **https://127.0.0.1:9080/**, verify the certificate fingerprint and establish trust, then sign in with the token stored on the server at `/etc/portbridge/admin.token`. Keep the token and installation output private. The full [installation guide](docs/INSTALL.en-US.md) covers verification, certificate import, upgrades and uninstalling.
+**Protect management and forwarded services separately.** The management allowlist protects the Web UI/API, not forwarding ports. Restrict those ports with your host firewall or cloud security groups. Private targets require explicit authorization; see [security](SECURITY.md) and [configuration examples](docs/CONFIGURATION.md).
 
-Fresh installations have no forwarding rules. Add an owned target, save a rule, inspect its runtime status and test real TCP/UDP application traffic before relying on it. [Example configurations](docs/CONFIGURATION.md) are templates, not production defaults; the demonstration rule is disabled.
+## Documentation and feedback
 
-## Understand the forwarding path
+[Configuration examples](docs/CONFIGURATION.md) · [API reference](docs/API.en-US.md) · [Monitoring and statistics](docs/MONITORING.en-US.md) · [Release notes](RELEASE_NOTES.md) · [All documentation](DOCUMENTATION_INDEX.md)
 
-| Rule shape | Expected planning behavior |
-|---|---|
-| Eligible same-family traffic | nftables DNAT/SNAT; optional software flowtable acceleration when the surrounding firewall can be admitted safely. |
-| IPv4 ↔ IPv6, explicit loopback or scoped target | Go proxy where required by the planner. |
-| `data_plane: "go"` | Explicit Go proxy path. |
-| `listen_host: "*"` | IPv4 and IPv6 are planned separately; dedicated loopback handling can produce a hybrid path. |
-
-The configured preference is not proof of the active path. Inspect `/api/status`, including `data_plane`, `go_running`, `kernel_state` and errors. An nftables failure does **not** imply an automatic Go fallback. PortBridge does not add the flowtable `flags offload` option and does not promise NIC hardware offload.
-
-For private targets, enable `allow_private_target` **and** provide a narrow matching `target_cidr_allowlist`. The latter authorizes otherwise restricted targets; it is not a universal allowlist for all public egress. See [forwarding limits](docs/forwarding-limits.md) before combining PortBridge with other firewall or NAT managers.
-
-## Security and operational boundaries
-
-The management allowlist protects the Web UI/API, **not forwarding ports**. Protect those ports separately. Source-only development defaults can use loopback HTTP before TLS preparation; the installed service enforces HTTPS. Direct management exposure needs native TLS, strict direct-peer allowlisting and restrictive host/cloud firewall rules. Forwarded client-IP headers are not trusted.
-
-Go connection/session/rate budgets do not automatically constrain nftables traffic. Go payload counters and nft L3 counters use different accounting boundaries; the UI's combined total is approximate, and hook counters must not be summed. HTTP success and an active service are not end-to-end health checks. Read [security](SECURITY.md) and [monitoring](docs/MONITORING.en-US.md).
-
-## Development
-
-Source checkouts and GitHub-generated Source code archives do not contain precompiled binaries. Use the **Go 1.27.1** toolchain with the supplied vendor tree. From the repository root:
-
-```bash
-go version
-GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go test ./...
-GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go test -race ./...
-GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go vet ./...
-```
-
-Some Linux integration tests need additional tools, privileges and isolated namespaces; a skipped test is not a pass. `make dist` creates unsigned development binaries, not publisher-signed installable release packages. See [contributing](CONTRIBUTING.md) and [vendored patches](VENDOR_PATCHES.md).
-
-## Documentation and community
-
-[Installation](docs/INSTALL.en-US.md) · [API](docs/API.en-US.md) · [Monitoring](docs/MONITORING.en-US.md) · [UDP design](docs/udp-dataplane.md) · [Release notes](RELEASE_NOTES.md) · [Publication checklist](docs/PUBLISHING.md)
-
-For ordinary bugs, open a [GitHub issue](https://github.com/liying-official/Go-nftables-portbridge/issues) with a minimal reproduction and sanitized logs. Follow [SECURITY.md](SECURITY.md) for suspected vulnerabilities; never publish tokens, private keys or unredacted deployment details.
+Report bugs or suggest improvements through [GitHub Issues](https://github.com/liying-official/Go-nftables-portbridge/issues). Read the [contributing guide](CONTRIBUTING.md) to get involved. Remove tokens, private keys and sensitive deployment details from logs and screenshots before sharing them. Follow [SECURITY.md](SECURITY.md) for suspected vulnerabilities.
 
 ## License
 
-PortBridge is distributed under the [MIT License](LICENSE). Bundled dependencies retain their own notices; see [vendored patches and UI notices](VENDOR_PATCHES.md).
+PortBridge is distributed under the [MIT License](LICENSE). Bundled dependencies retain their own license notices; see [third-party dependency notes](VENDOR_PATCHES.md).
