@@ -18,7 +18,7 @@
 <p align="center">
   <a href="docs/INSTALL.zh-CN.md">开始安装</a> ·
   <a href="docs/API.zh-CN.md">API 文档</a> ·
-  <a href="DOCUMENTATION_INDEX.md">完整文档</a> ·
+  <a href="docs/INDEX.md">完整文档</a> ·
   <a href="https://github.com/liying-official/Go-nftables-portbridge/releases">下载发布版</a>
 </p>
 
@@ -60,7 +60,7 @@
 
 ## 文档与反馈
 
-[配置示例](docs/CONFIGURATION.md) · [API 文档](docs/API.zh-CN.md) · [监控与统计](docs/MONITORING.zh-CN.md) · [版本说明](RELEASE_NOTES.zh-CN.md) · [完整文档](DOCUMENTATION_INDEX.md)
+[配置示例](docs/CONFIGURATION.md) · [API 文档](docs/API.zh-CN.md) · [监控与统计](docs/MONITORING.zh-CN.md) · [版本说明](RELEASE_NOTES.zh-CN.md) · [完整文档](docs/INDEX.md)
 
 通过 [GitHub Issues](https://github.com/liying-official/Go-nftables-portbridge/issues) 反馈问题或提出建议；参与开发请阅读[贡献指南](CONTRIBUTING.md)。提交日志和截图前请移除令牌、私钥及敏感部署信息。疑似安全漏洞请遵循 [SECURITY.md](SECURITY.md) 中的报告流程。
 

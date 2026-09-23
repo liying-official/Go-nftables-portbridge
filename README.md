@@ -18,7 +18,7 @@
 <p align="center">
   <a href="docs/INSTALL.en-US.md">Get started</a> ·
   <a href="docs/API.en-US.md">API reference</a> ·
-  <a href="DOCUMENTATION_INDEX.md">Documentation</a> ·
+  <a href="docs/INDEX.md">Documentation</a> ·
   <a href="https://github.com/liying-official/Go-nftables-portbridge/releases">Download</a>
 </p>
 
@@ -60,7 +60,7 @@ After installation: **add a forwarding rule → inspect its runtime state → ve
 
 ## Documentation and feedback
 
-[Configuration examples](docs/CONFIGURATION.md) · [API reference](docs/API.en-US.md) · [Monitoring and statistics](docs/MONITORING.en-US.md) · [Release notes](RELEASE_NOTES.md) · [All documentation](DOCUMENTATION_INDEX.md)
+[Configuration examples](docs/CONFIGURATION.md) · [API reference](docs/API.en-US.md) · [Monitoring and statistics](docs/MONITORING.en-US.md) · [Release notes](RELEASE_NOTES.md) · [All documentation](docs/INDEX.md)
 
 Report bugs or suggest improvements through [GitHub Issues](https://github.com/liying-official/Go-nftables-portbridge/issues). Read the [contributing guide](CONTRIBUTING.md) to get involved. Remove tokens, private keys and sensitive deployment details from logs and screenshots before sharing them. Follow [SECURITY.md](SECURITY.md) for suspected vulnerabilities.
 
