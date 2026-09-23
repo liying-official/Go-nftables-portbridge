@@ -208,7 +208,7 @@ Cache-Control: no-store
 | 端口、限制、秒数 | JSON 整数，不是字符串，不支持 `"9080"` 代替 `9080` |
 | 布尔值 | JSON `true` / `false`，不是字符串 |
 | 时间 | `time.Time` 的 JSON 字符串，RFC3339 风格，可能有小数秒和时区偏移 |
-| 未初始化时间 | `started_at`、`not_after` 可能为 `0001-01-01T00:00:00Z`；当前工具链下 `omitempty` 并不会省略这里的零值 time.Time |
+| 未初始化时间 | `started_at`、`not_after`、`sampled_at`、`nft_hooks_sampled_at` 可能为 `0001-01-01T00:00:00Z`；当前工具链下 `omitempty` 并不会省略这里的零值 time.Time |
 | 空集合 | `/api/config` 的规则、白名单、DNS 列表以及 `/api/status` 的 ACL 列表通常返回 `[]` |
 | Rule 可省略字段 | `omitempty` 字段在零值/空值时不一定出现，具体见第 10 节 |
 | 累计计数器 | JSON 数字，Go 类型为 `uint64`；超大计数在 JavaScript 普通 Number 中存在整数精度边界 |
@@ -268,7 +268,7 @@ Authorization: Bearer <admin-token>
     "whitelist": [],
     "tls_cert_file": "/etc/portbridge-tls/fullchain.pem",
     "tls_key_file": "/etc/portbridge-tls/privkey.pem",
-    "tls_min_version": "1.3",
+    "tls_min_version": "1.2",
     "dns_servers": []
   },
   "rules": [],
@@ -278,7 +278,7 @@ Authorization: Bearer <admin-token>
       "enabled": true,
       "self_signed": true,
       "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "not_after": "2027-09-20T00:00:00Z"
+      "not_after": "2036-01-01T00:00:00Z"
     }
   }
 }
@@ -349,14 +349,14 @@ Authorization: Bearer <admin-token>
 | `listen_ipv6` | string | IPv6 管理监听地址；空字符串表示该地址不启用 | 重启 |
 | `auto_lan_acl` | boolean | 自动允许直接连接的私有/链路本地网段；严格模式必须为 false | 立即刷新 ACL |
 | `strict_ip_allowlist` | boolean | 严格管理白名单；要求当前请求已经使用原生 HTTPS | 立即刷新 ACL |
-| `allow_insecure_http` | boolean | 历史开发兼容风险确认；`require_https=true` 时不能设为 true | 改变该值计入重启判断 |
+| `allow_insecure_http` | boolean | 非回环明文 HTTP 的显式风险确认；`require_https=true` 时不能设为 true | 改变该值计入重启判断 |
 | `whitelist` | string[] | IP 或 CIDR，规范化后去重排序，最多 1024 项 | 立即刷新 ACL |
 | `tls_cert_file` | string | 服务器上证书文件的绝对路径，与私钥同时配置 | 重启 |
 | `tls_key_file` | string | 服务器上私钥文件的绝对路径，与证书同时配置 | 重启 |
 | `tls_min_version` | string | `"1.2"` / `"1.3"`；省略或空字符串保留原策略 | 有效策略变化时重启 |
 | `dns_servers` | string[] | 最多 8 个去重后的 DNS 服务器；空列表使用系统解析器 | 更新解析器并重新应用期望规则 |
 
-**这是替换式保存，不是 PATCH。** 除 `tls_min_version` 的显式兼容处理外，省略的布尔字段为 false，省略的字符串为空，省略的列表会被规范化为空列表。只提交想改的一个字段可能清空证书路径、管理白名单或关闭安全模式，也可能直接报错。正确方式是读取 `/api/config`，提取 `.web`，修改目标字段，再完整 PUT。[^settings]
+**这是替换式保存，不是 PATCH。** 只有省略或为空的 `tls_min_version` 保留原策略；其他省略的布尔字段为 false，字符串为空，列表会被规范化为空列表。只提交想改的一个字段可能清空证书路径、管理白名单或关闭安全模式，也可能直接报错。正确方式是读取 `/api/config`，提取 `.web`，修改目标字段，再完整 PUT。[^settings]
 
 ### 7.2 请求与响应示例
 
@@ -691,7 +691,7 @@ target_cidr_allowlist
 |---|---|---|
 | `rule` | Rule | 该运行态记录关联的规则对象；可能不是持久配置中的普通规则 |
 | `stats` | StatsSnapshot | 运行标志、错误与 Go 路径统计 |
-| `traffic` | TrafficSnapshot | 每秒后台采样的 Go、nft 尽力统计、hook counter、每规则实时速率及有效性标志；见[统计说明](MONITORING.zh-CN.md) |
+| `traffic` | TrafficSnapshot | 每秒后台采样的 Go、nft 尽力统计、hook counter、每规则实时速率及有效性标志；见[第 11.5 节](#115-trafficsnapshot-与采样有效性)和[统计说明](MONITORING.zh-CN.md) |
 | `data_plane` | string | 运行/风险视角的数据面标签，与 `rule.data_plane` 是不同字段 |
 | `go_running` | boolean | 该逻辑规则是否至少存在一个已登记的 Go runner；不是所有派生入口逐一健康证明 |
 | `kernel_state` | string | 管理器对内核状态证据的分类，见下表 |
@@ -770,6 +770,49 @@ target_cidr_allowlist
 这不是数据面健康样例，也不是认定存在实际转发；它说明服务器没有把“未能证明旧内核路径为空”伪装为完全停止。正常运行的源代码同样会为待撤销/暂停状态保留显式风险标记。[^manager][^kernel-state]
 
 接入方可采用以下**建议策略**，它不是服务器提供的额外健康契约：配置希望启用时检查无 `last_error`、运行标签符合预期、预期 Go 路径存在且内核证据不存在未完成风险；随后进行真实业务载荷探测。希望停用/删除时同时核对期望配置和运行态撤销证据，不能只数 `enabled` 或 `running` 的 true/false。
+
+### 11.5 TrafficSnapshot 与采样有效性
+
+采集器约每秒后台采样一次，读取状态不会额外触发 nft/conntrack 命令。API 分开保留 Go 有效载荷与 nft L3 尽力观测；只有 WebGUI 将累计字节合并为近似展示总量，实时速率仍分开显示。[^telemetry][^metrics][^gui]
+
+| TrafficSnapshot 字段 | JSON 类型 | 含义 |
+|---|---|---|
+| `go` | TrafficSeries | Go 有效载荷观测，包数字段仅表示 UDP |
+| `nft` | TrafficSeries | conntrack L3 尽力观测，包含已同步时的 flowtable 计数 |
+| `nft_hooks` | NFTHookCounter[] | 按 hook 名排序的累计 hook 观测值，初始为 `[]` |
+| `nft_hooks_sampled_at` | string | 上次成功采集自有 hook 的时间，或零值时间 |
+| `nft_hooks_available` | boolean | hook 样本可用且新鲜，与 conntrack accounting 可用性独立 |
+| `nft_best_effort` | boolean | 被采样的运行规划使用 nft；未初始化或纯 Go 规划时为 false，不代表计数完整性 |
+| `nft_status` | string | 下表中的采集状态，不是转发健康状态 |
+| `counter_resets` | integer/uint64 | 检测到的 nft hook/conntrack 计数下降次数，不统计所有 Go 或进程重置 |
+
+`go` 和 `nft` 均包含以下全部 12 个 TrafficSeries 字段：
+
+| TrafficSeries 字段 | JSON 类型 | 含义 |
+|---|---|---|
+| `bytes_up`、`bytes_down` | integer/uint64 | 累计观测字节，分别为客户端 → 目标、目标 → 客户端 |
+| `packets_up`、`packets_down` | integer/uint64 | 各方向观测包数，Go 仅统计 UDP 包 |
+| `bytes_up_per_second`、`bytes_down_per_second` | number/float64 | 字节速率估计，只有两个有效标志均为 true 时可用 |
+| `packets_up_per_second`、`packets_down_per_second` | number/float64 | 包速率估计，具有相同有效性要求 |
+| `sampled_at` | string | 上次成功采样时间，或零值时间 |
+| `interval_seconds` | number/float64 | 最近有效差值使用的时间间隔，新采样无法形成速率时为零 |
+| `available` | boolean | 来源样本可用且不超过三秒 |
+| `rate_ready` | boolean | 已取得有效近期差值，须同时检查 `available` |
+
+每个 NFTHookCounter 包含 `hook`（string）、`bytes` 和 `packets`（integer/uint64）。hook 标签为 `prerouting`、`output`、`postrouting`、`forward` 或 `flowtable`。不同 hook 可能重复计数，也遗漏绕过普通 hook 的快速路径报文；不能相加或视为完整转发吞吐量。
+
+| `nft_status` | 含义 |
+|---|---|
+| `pending` | 尚未取得该规则/Stats 身份的样本 |
+| `not_applicable` | 被采样的规划不使用 nft |
+| `sampled` | nft 采集成功，且该规则有完整可用的 conntrack accounting 样本 |
+| `accounting_unavailable` | hook 采集成功，但该规则没有完整可用的 conntrack accounting 样本 |
+| `unavailable` | 没有 nft 读取器或采集失败，随后可能被 `stale` 覆盖 |
+| `stale` | 使用 nft 的记录在三秒内没有成功的 hook 样本，包括尚未初始化的 hook 时间 |
+
+首次采样、不可用后恢复、计数下降及过长采样间隔都需要重新取得有效差值。读取过期样本时会清除有效标志，但可能保留旧速率、间隔和累计值。**数值为零或仍保留旧值均不能证明当前流量；使用速率前必须确认 `available && rate_ready`。** nft 样本不完整时保留上次完整流基线，独立 hook 数据仍可能可用。Go 样本可用也不证明 runner 健康或正在运行。
+
+flowtable 同步可能延迟，短连接可能完全未被采样。计数是进程内观测，不是持久历史或计费数据；详见[统计边界](MONITORING.zh-CN.md)。
 
 ## 12. 错误响应与处理方法
 
@@ -915,7 +958,7 @@ pb_api PUT "/api/rules/$PB_RULE_ID" \
 pb_api GET /api/status | jq --arg id "$PB_RULE_ID" \
   '.rules[] | select(.rule.id == $id) |
    {id: .rule.id, desired_enabled: .rule.enabled,
-    data_plane, go_running, kernel_state, stats}'
+    data_plane, go_running, kernel_state, stats, traffic}'
 ```
 
 若响应为 2xx，但 `last_error` 非空或内核证据未验证，先处理状态中指出的环境/路径问题，不能将此步骤记为业务验收通过。
@@ -1283,7 +1326,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 
 ## 17. Prometheus 指标
 
-`GET /metrics` 共用管理 HTTPS、来源白名单及 Bearer 认证，GET 不要求 CSRF；成功返回 `text/plain; version=0.0.4; charset=utf-8`，不是 JSON。指标不输出规则名、转发端点或令牌，采集缺失时省略实时速率并通过有效性指标告警。配置示例、字段与 flowtable 尽力统计边界见[统计说明](MONITORING.zh-CN.md)。
+`GET /metrics` 共用管理 HTTPS、来源白名单及 Bearer 认证，GET 不要求 CSRF；成功返回 `text/plain; version=0.0.4; charset=utf-8`，不是 JSON。指标不输出规则名、转发端点或令牌，凭据仍拥有完整管理员权限，并非只读监控权限。不可用或预热时省略实时速率，保留的累计值须结合有效性指标解释；系统不会自动配置告警规则。全部 15 类指标、类型、标签及抓取示例见[统计说明](MONITORING.zh-CN.md)。[^metrics]
 
 ## 实现依据与源码链接
 
@@ -1318,11 +1361,13 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 [^plan]: [`internal/proxy/plan.go`](../internal/proxy/plan.go)。配置/运行态数据面枚举、IPv4/IPv6 路径规划、DNS 验证/缓存、worker 分配。
 [^runner]: [`internal/proxy/manager.go`](../internal/proxy/manager.go)。Go runner 启动、端口偏移映射与绑定错误。
 [^stats]: [`internal/proxy/stats.go`](../internal/proxy/stats.go)。StatsSnapshot 全字段、running/started_at 更新与累计计数快照。
+[^telemetry]: [`internal/proxy/telemetry.go`](../internal/proxy/telemetry.go)。TrafficSnapshot/TrafficSeries、hook 计数、采集状态、采样及有效性。
+[^metrics]: [`internal/web/metrics.go`](../internal/web/metrics.go)。受认证保护的 Prometheus 响应格式、指标、类型、标签和不可用速率省略规则。
 [^tcp-stats]: [`internal/proxy/tcp.go`](../internal/proxy/tcp.go)。接入计数、上游拨号与字节数在双向复制结束后汇总。
 [^udp-implementation]: [`internal/proxy/udp.go`](../internal/proxy/udp.go)。自动 worker、UDP 包过滤/丢弃/发送计数与维护汇总。
 [^budgets]: [`internal/proxy/budget.go`](../internal/proxy/budget.go)。跨 runner/worker/端口/地址族共享来源预算与 UDP 令牌桶。
-[^udp-doc]: [`docs/udp-dataplane.md`](udp-dataplane.md) 的 Scope、Defaults and capacity boundaries；[`README.md`](../README.md)。Go 与内核路径计数/预算边界、默认值及批量发送错误语义。
+[^udp-doc]: [`docs/udp-dataplane.md`](udp-dataplane.md) 的“范围与转发路径”“默认值与容量边界”；[`README.zh-CN.md`](../README.zh-CN.md)。Go 与内核路径计数/预算边界、默认值及批量发送错误语义。
 [^gui]: [`internal/web/static/app.js`](../internal/web/static/app.js) 和 [`i18n.js`](../internal/web/static/i18n.js)。API 客户端包装、bootstrap、500 ms 串行状态轮询、完整设置/Rule 提交、语言选择、已知错误翻译与本地退出。
 [^cli]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go)。默认配置/Token 路径与相关启动参数。
-[^deployment]: [`README.md`](../README.md)、[`packaging/portbridge.service`](../packaging/portbridge.service)。安装后的原生 HTTPS 强制策略、证书信任及回环恢复说明。
+[^deployment]: [`README.zh-CN.md`](../README.zh-CN.md)、[`packaging/portbridge.service`](../packaging/portbridge.service)。安装后的原生 HTTPS 强制策略、证书信任及回环恢复说明。
 [^main-refresh]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go)。初始化、每 30 秒读取 Store 快照并刷新 ACL/规则、退出信号。

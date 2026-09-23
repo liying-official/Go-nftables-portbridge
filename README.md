@@ -17,7 +17,7 @@ PortBridge combines nftables/flowtable acceleration for eligible same-family tra
 
 | Capability | What you get |
 |---|---|
-| Web GUI and API | Create, edit, enable and delete rules; configure settings; inspect runtime state; rotate the administrator token. |
+| Web GUI and API | Create, edit, enable and delete rules; configure settings; inspect runtime state; rotate the administrator token. See the [English API reference](docs/API.en-US.md). |
 | Bilingual Tabler UI | Switch English / 简体中文 in the same interface, with sky-blue cards, responsive rule tables and mobile navigation. Tabler Core and Icons are served locally. |
 | TCP / UDP | Forward TCP, UDP or both; map individual ports or equal-length ranges of up to 4096 ports. |
 | IPv4 and IPv6 | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4. |
@@ -32,6 +32,8 @@ The language menu is available on the sign-in page, dashboard and rule dialog. B
 ## Quick start
 
 For an interactive fresh installation, see the [one-click installer](docs/ONECLICK.en-US.md). It selects the latest stable release, asks for language and a persistent strict IP allowlist, and exposes management on local interface addresses. This differs from the loopback-only manual procedure below. Existing installations are never overwritten automatically.
+
+The one-click installer follows GitHub's latest published stable release, not the version of a local checkout or this document. The version-pinned instructions below require the v2.5.0 release assets to be published; if they are unavailable, stop and use the documentation matching an available release. Do not substitute a source archive for a prebuilt package.
 
 Run in an interactive **root Bash terminal** (use `sudo -i` first if necessary):
 
@@ -141,7 +143,7 @@ Use that token to sign in. It is not printed during a normal installation. Never
 
 ## Create your first forwarding rule
 
-In the Web GUI, add a rule with a protocol, listen address/port, target host/port and data-plane preference. Save it, check its **actual runtime state**, then test traffic from a client that should be allowed to use the forwarding port.
+In the Web GUI, add a rule with a protocol, listen address/port, target host/port and data-plane preference. Save it, check the rule's status and any error, then test traffic from an allowed client. The data-plane column shows the configured preference, not the actual path; inspect `data_plane`, `go_running` and `kernel_state` in `GET /api/status` for runtime details.
 
 | Forwarding direction | Data-plane behavior |
 |---|---|
@@ -191,7 +193,7 @@ systemctl show portbridge -p ActiveState -p SubState -p Result -p NRestarts
 sudo journalctl -u portbridge -n 50 --no-pager
 ```
 
-Expect `ActiveState=active`, `SubState=running`, and no ongoing restart loop. Inspect logs when a service or rule is unhealthy; do not disable HTTPS, erase ownership/recovery records or open the management allowlist to work around a failure. Redact tokens and operational details before sharing logs. For nftables-path inspection, use `sudo nft list table inet portbridge`; The WebGUI separates Go counters from best-effort kernel observations; see [monitoring boundaries](docs/MONITORING.en-US.md).
+Expect `ActiveState=active`, `SubState=running`, and no ongoing restart loop. Inspect logs when a service or rule is unhealthy; do not disable HTTPS, erase ownership/recovery records or open the management allowlist to work around a failure. Redact tokens and operational details before sharing logs. For nftables-path inspection, use `sudo nft list table inet portbridge`. WebGUI combines cumulative Go/nft observations into an approximate total and displays their real-time rates separately; API and Prometheus preserve separate sources. See [monitoring boundaries](docs/MONITORING.en-US.md).
 
 ## Upgrade and uninstall
 
@@ -207,7 +209,7 @@ This keeps configuration. Adding `--purge` also removes configuration and the se
 
 ## Development and documentation
 
-Source builds require **exactly Go 1.27.1**. Dependencies are vendored. From a source checkout, run:
+Use **Go 1.27.1** for the documented development and release workflow; the source installer requires this exact toolchain. The module declares Go 1.27.1 as its minimum version, and dependencies are vendored. Source checkouts and GitHub-generated Source code archives do not contain precompiled binaries. From a source checkout, run:
 
 ```bash
 GOPROXY=off go test ./...

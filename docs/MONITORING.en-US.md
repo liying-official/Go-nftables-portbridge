@@ -43,14 +43,27 @@ scrape_configs:
 
 Replace the example host and certificate paths. Verify self-signed certificate fingerprints before trusting them; do not use `insecure_skip_verify` as a shortcut. Allow the scraper's direct source IP in the management allowlist.
 
-Main metrics:
+All 15 metric families are listed below. Except for uptime, every metric has `rule_id` and `protocol` labels (`tcp`, `udp` or `both` for configured rules). The additional-label column lists label names, not a literal PromQL selector. `source` is either `go` or `nft`; `direction` is either `up` or `down`; `hook` identifies the observed hook.
 
-- `portbridge_rule_bytes_total{rule_id,protocol,source="go|nft",direction="up|down"}`: separate cumulative observations by source.
-- `portbridge_rule_bytes_per_second`: latest byte-rate estimate; absent during warmup/unavailability. Multiply by eight for bit/s.
-- `portbridge_rule_sample_available`, `portbridge_rule_rate_ready`, `portbridge_rule_sample_timestamp_seconds`: freshness and validity.
-- `portbridge_nft_packets_total`, `portbridge_nft_hook_bytes_total`, `portbridge_nft_hook_packets_total`, `portbridge_nft_hooks_available`, `portbridge_nft_counter_resets_total`: kernel observations and reset diagnostics.
-- `portbridge_go_active_tcp_connections`, `portbridge_go_active_udp_sessions`, `portbridge_go_udp_drops_total`: Go resources and application-observed drops.
-- `portbridge_rule_running`: the manager's running/risk flag, **not** an end-to-end health guarantee.
+| Metric | Type | Additional labels | Meaning |
+|---|---|---|---|
+| `portbridge_uptime_seconds` | gauge | None; no rule labels | Seconds since the Web Server was created |
+| `portbridge_rule_running` | gauge | None | Manager running/risk flag (0/1), not end-to-end health |
+| `portbridge_rule_bytes_total` | counter | `source`, `direction` | Cumulative observations; Go payload or nft L3 bytes |
+| `portbridge_rule_bytes_per_second` | gauge | `source`, `direction` | Latest observed byte-rate estimate; multiply by eight for bit/s |
+| `portbridge_rule_sample_available` | gauge | `source` | Source sample is fresh and available (0/1) |
+| `portbridge_rule_rate_ready` | gauge | `source` | A valid recent delta exists (0/1) |
+| `portbridge_rule_sample_timestamp_seconds` | gauge | `source` | Last successful sample's Unix time; zero before initialization |
+| `portbridge_nft_packets_total` | counter | `direction` | Best-effort conntrack L3 packets |
+| `portbridge_nft_hook_bytes_total` | counter | `hook` | Observed hook bytes; hooks must not be summed |
+| `portbridge_nft_hook_packets_total` | counter | `hook` | Observed hook packets, not complete forwarding volume |
+| `portbridge_nft_hooks_available` | gauge | None | Owned hook sample is fresh and available (0/1) |
+| `portbridge_nft_counter_resets_total` | counter | None | Detected decreases in kernel counters |
+| `portbridge_go_active_tcp_connections` | gauge | None | Current Go TCP connections |
+| `portbridge_go_active_udp_sessions` | gauge | None | Current Go UDP sessions |
+| `portbridge_go_udp_drops_total` | counter | None | Application-observed Go UDP drops, not network-wide loss |
+
+Byte-rate series are emitted only when both source validity flags are true. Byte/packet counters can remain present with the last known value or an initial zero even when unavailable; their presence does not prove a successful sample. Hook series appear only for previously observed hooks and also require `portbridge_nft_hooks_available` to assess freshness. Process restart or removal of a rule's runtime state can reset counters; they are not durable totals. The collector does not create alert rules automatically. The full JSON traffic schema is in [API section 11.5](API.en-US.md#115-trafficsnapshot-and-sampling-validity).
 
 An nft example that excludes unavailable/warming-up rate samples:
 

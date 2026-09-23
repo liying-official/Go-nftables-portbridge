@@ -208,7 +208,7 @@ Unknown paths, method mismatches, HTTP ACL rejection, and transport failures are
 | Ports, limits, seconds | JSON integers, not strings; `"9080"` cannot replace `9080` |
 | Booleans | JSON `true` / `false`, not strings |
 | Time | `time.Time` JSON strings in RFC3339-style format, potentially with fractional seconds and timezone offsets |
-| Uninitialized time | `started_at` and `not_after` may appear as `0001-01-01T00:00:00Z`; under the current toolchain, `omitempty` does not omit zero-value `time.Time` here |
+| Uninitialized time | `started_at`, `not_after`, `sampled_at` and `nft_hooks_sampled_at` may appear as `0001-01-01T00:00:00Z`; under the current toolchain, `omitempty` does not omit zero-value `time.Time` here |
 | Empty collections | Rules, allowlists, DNS lists from `/api/config`, and ACL lists from `/api/status` generally return `[]` |
 | Optional Rule fields | `omitempty` fields may be absent when zero/empty; see Section 10 |
 | Accumulated counters | JSON numbers backed by Go `uint64`; very large values can exceed exact integer precision in JavaScript Number |
@@ -268,7 +268,7 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
     "whitelist": [],
     "tls_cert_file": "/etc/portbridge-tls/fullchain.pem",
     "tls_key_file": "/etc/portbridge-tls/privkey.pem",
-    "tls_min_version": "1.3",
+    "tls_min_version": "1.2",
     "dns_servers": []
   },
   "rules": [],
@@ -278,7 +278,7 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
       "enabled": true,
       "self_signed": true,
       "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "not_after": "2027-09-20T00:00:00Z"
+      "not_after": "2036-01-01T00:00:00Z"
     }
   }
 }
@@ -349,14 +349,14 @@ A `200` from the status endpoint only means that the read succeeded. Rule startu
 | `listen_ipv6` | string | IPv6 management listener address; empty disables this address | Restart |
 | `auto_lan_acl` | boolean | Automatically allow directly connected private/link-local networks; must be false in strict mode | ACL refreshed immediately |
 | `strict_ip_allowlist` | boolean | Strict management allowlist; current request must already use native HTTPS | ACL refreshed immediately |
-| `allow_insecure_http` | boolean | Legacy development risk acknowledgement; cannot be true when `require_https=true` | A change contributes to restart calculation |
+| `allow_insecure_http` | boolean | Explicit acknowledgement for non-loopback plaintext HTTP; cannot be true when `require_https=true` | A change contributes to restart calculation |
 | `whitelist` | string[] | IPs or CIDRs; normalized, de-duplicated, sorted; maximum 1024 | ACL refreshed immediately |
 | `tls_cert_file` | string | Absolute server-local certificate-file path; configured together with private key | Restart |
 | `tls_key_file` | string | Absolute server-local private-key path; configured together with certificate | Restart |
 | `tls_min_version` | string | `"1.2"` / `"1.3"`; omitted or empty preserves current policy | Restart when the effective policy changes |
 | `dns_servers` | string[] | Up to 8 de-duplicated DNS servers; empty uses the system resolver | Resolver updated and desired rules reapplied |
 
-**This is replacement-style persistence, not PATCH.** Except for the explicit compatibility handling of `tls_min_version`, omitted booleans become false, omitted strings become empty, and omitted lists normalize to empty lists. Sending only the field you want to change can clear certificate paths/allowlists, disable security modes, or fail validation. Correct usage is to read `/api/config`, extract `.web`, modify the required field, and PUT the complete object.[^settings]
+**This is replacement-style persistence, not PATCH.** Only an omitted/empty `tls_min_version` preserves the existing policy; other omitted booleans become false, strings become empty, and lists normalize to empty lists. Sending only the field you want to change can clear certificate paths/allowlists, disable security modes, or fail validation. Correct usage is to read `/api/config`, extract `.web`, modify the required field, and PUT the complete object.[^settings]
 
 ### 7.2 Request and response example
 
@@ -691,7 +691,7 @@ Each element of `/api/status.rules[]` has this structure:[^manager-runtime]
 |---|---|---|
 | `rule` | Rule | Rule object associated with the runtime record; it may not be a normal persistent-config rule |
 | `stats` | StatsSnapshot | Running flag, errors, and Go-path statistics |
-| `traffic` | TrafficSnapshot | Background-sampled Go/nft observations, hook counters, per-rule rates and validity flags; see [monitoring](MONITORING.en-US.md) |
+| `traffic` | TrafficSnapshot | Background-sampled Go/nft observations, hook counters, per-rule rates and validity flags; see [section 11.5](#115-trafficsnapshot-and-sampling-validity) and [monitoring](MONITORING.en-US.md) |
 | `data_plane` | string | Data-plane label from the runtime/risk perspective; distinct from `rule.data_plane` |
 | `go_running` | boolean | Whether at least one registered Go runner exists for the logical rule; not proof that every derived ingress path is healthy |
 | `kernel_state` | string | Manager classification of kernel-state evidence; see below |
@@ -770,6 +770,49 @@ When the runtime environment cannot prove that the old kernel path is empty, sav
 This is not a healthy data-plane example and does not assert that forwarding actually existed. It shows that the server did not misrepresent “old kernel path could not be proven absent” as a fully stopped condition. The production source likewise retains explicit risk flags for pending retirement/suspended states.[^manager][^kernel-state]
 
 Integrators may use the following **recommended strategy**; it is not an additional server health contract. When desired configuration is enabled, require no `last_error`, a runtime label consistent with expectations, expected Go-path presence where applicable, and no unresolved kernel-state risk; then perform real workload payload probes. For disable/delete, verify both desired configuration and runtime retirement evidence rather than counting only `enabled` or `running` booleans.
+
+### 11.5 TrafficSnapshot and sampling validity
+
+The collector samples in the background about once per second. Reading status does not trigger nft/conntrack commands. The API keeps Go payload and best-effort nft L3 observations separate; WebGUI alone combines their cumulative bytes into an approximate display total, and still shows separate rates.[^telemetry][^metrics][^gui]
+
+| TrafficSnapshot field | JSON type | Meaning |
+|---|---|---|
+| `go` | TrafficSeries | Go payload observations; packet counters describe UDP only |
+| `nft` | TrafficSeries | Best-effort conntrack L3 observations, including flowtable counters when synchronized |
+| `nft_hooks` | NFTHookCounter[] | Cumulative observed hook counters, sorted by hook name; initially `[]` |
+| `nft_hooks_sampled_at` | string | Time of the last successful owned-hook sample, or zero-value time |
+| `nft_hooks_available` | boolean | Hook sample is available and fresh; independent of conntrack accounting availability |
+| `nft_best_effort` | boolean | The sampled runtime plan uses nft; false before initialization or for a Go-only plan. Not a completeness guarantee |
+| `nft_status` | string | Collection state below, not forwarding health |
+| `counter_resets` | integer/uint64 | Detected decreases in nft hook/conntrack counters, not a count of every Go or process reset |
+
+Both `go` and `nft` contain all 12 TrafficSeries fields:
+
+| TrafficSeries field(s) | JSON type | Meaning |
+|---|---|---|
+| `bytes_up`, `bytes_down` | integer/uint64 | Observed cumulative bytes, client → target / target → client |
+| `packets_up`, `packets_down` | integer/uint64 | Observed packets in each direction; UDP only for Go |
+| `bytes_up_per_second`, `bytes_down_per_second` | number/float64 | Byte-rate estimates, usable only when both validity flags are true |
+| `packets_up_per_second`, `packets_down_per_second` | number/float64 | Packet-rate estimates with the same validity requirement |
+| `sampled_at` | string | Last successful sample time, or zero-value time |
+| `interval_seconds` | number/float64 | Interval used for the latest valid delta; zero when a newly collected sample cannot form a rate |
+| `available` | boolean | Source sample is available and no more than three seconds old |
+| `rate_ready` | boolean | A valid recent delta exists; check together with `available` |
+
+Each NFTHookCounter contains `hook` (string), `bytes` and `packets` (integer/uint64). Hook labels are `prerouting`, `output`, `postrouting`, `forward` or `flowtable`. Hooks overlap and miss fast-path bypass packets; never add them together or treat them as full forwarding throughput.
+
+| `nft_status` | Meaning |
+|---|---|
+| `pending` | No sample yet for this rule/Stats identity |
+| `not_applicable` | The sampled plan does not use nft |
+| `sampled` | nft collection succeeded and complete conntrack accounting is available for this rule |
+| `accounting_unavailable` | Hook collection succeeded, but this rule has no complete usable conntrack accounting sample |
+| `unavailable` | nft reader is absent or collection failed; can be superseded by `stale` |
+| `stale` | An nft-using row has no successful hook sample within three seconds, including an uninitialized hook timestamp |
+
+The first sample, recovery after an unavailable sample, counter decreases and overly long sampling gaps require a new valid delta. Stale reads clear validity flags but may retain old numeric rates, intervals and counters. **Neither a zero numeric rate nor a retained value establishes current traffic: require `available && rate_ready` before using a rate.** An incomplete nft sample retains the last complete flow baseline; hook data may still be usable. Go sample availability does not prove a runner is healthy or active.
+
+Flowtable synchronization may lag, and short-lived connections may never appear in a sample. Counters are process-local observations, not durable history or billing data. See [monitoring boundaries](MONITORING.en-US.md).
 
 ## 12. Error Responses and Handling
 
@@ -916,7 +959,7 @@ pb_api PUT "/api/rules/$PB_RULE_ID" \
 pb_api GET /api/status | jq --arg id "$PB_RULE_ID" \
   '.rules[] | select(.rule.id == $id) |
    {id: .rule.id, desired_enabled: .rule.enabled,
-    data_plane, go_running, kernel_state, stats}'
+    data_plane, go_running, kernel_state, stats, traffic}'
 ```
 
 If the write returns 2xx but `last_error` is non-empty or kernel evidence is not verified, resolve the indicated environment/path issue before treating the workload as accepted.
@@ -1285,7 +1328,7 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 
 ## 17. Prometheus metrics
 
-`GET /metrics` shares management HTTPS, source-IP allowlisting and Bearer authentication; GET needs no CSRF. Success returns `text/plain; version=0.0.4; charset=utf-8`, not JSON. Metrics omit rule names, forwarding endpoints and tokens. Unavailable rate samples are omitted and accompanied by validity gauges. Configuration, fields and best-effort flowtable boundaries are described in [monitoring](MONITORING.en-US.md).
+`GET /metrics` shares management HTTPS, source-IP allowlisting and Bearer authentication; GET needs no CSRF. Success returns `text/plain; version=0.0.4; charset=utf-8`, not JSON. Metrics omit rule names, forwarding endpoints and tokens. The credential still grants full administrator access, not read-only monitoring. Unavailable/warming-up rate samples are omitted; retained counters must be interpreted with validity gauges. No alert rules are configured automatically. All 15 metric families, their types/labels and a scrape example are documented in [monitoring](MONITORING.en-US.md).[^metrics]
 
 ## Implementation References and Source Links
 
@@ -1320,6 +1363,8 @@ The links below assume this file is stored in the repository `docs/` directory a
 [^plan]: [`internal/proxy/plan.go`](../internal/proxy/plan.go). Config/runtime data-plane enums, IPv4/IPv6 planning, DNS validation/cache, and worker allocation.
 [^runner]: [`internal/proxy/manager.go`](../internal/proxy/manager.go). Go-runner startup, port-offset mapping, and bind errors.
 [^stats]: [`internal/proxy/stats.go`](../internal/proxy/stats.go). All StatsSnapshot fields, running/started_at updates, and cumulative-counter snapshots.
+[^telemetry]: [`internal/proxy/telemetry.go`](../internal/proxy/telemetry.go). TrafficSnapshot/TrafficSeries, hook counters, collection states, sampling and validity.
+[^metrics]: [`internal/web/metrics.go`](../internal/web/metrics.go). Authenticated Prometheus response format, metric families, types, labels and unavailable-rate omission.
 [^tcp-stats]: [`internal/proxy/tcp.go`](../internal/proxy/tcp.go). Admission counts, upstream dial, and byte aggregation after bidirectional copy completes.
 [^udp-implementation]: [`internal/proxy/udp.go`](../internal/proxy/udp.go). Automatic workers, UDP packet filtering/drop/send counters, and maintenance aggregation.
 [^budgets]: [`internal/proxy/budget.go`](../internal/proxy/budget.go). Shared source budgets across runners/workers/ports/address families and UDP token buckets.

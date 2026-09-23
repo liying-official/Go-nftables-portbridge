@@ -17,7 +17,7 @@ PortBridge 将 nftables/flowtable 加速与 Go 代理结合：符合条件的同
 
 | 能力 | 说明 |
 |---|---|
-| WebGUI 与 API | 创建、编辑、启停和删除规则，管理设置，查看运行状态，轮换管理员令牌。 |
+| WebGUI 与 API | 创建、编辑、启停和删除规则，管理设置，查看运行状态，轮换管理员令牌；详见[中文 API 文档](docs/API.zh-CN.md)。 |
 | Tabler 双语界面 | 同一界面切换简体中文 / English，采用天蓝色卡片、响应式规则表和移动端导航；Tabler Core 与 Icons 均由本机提供。 |
 | TCP / UDP | 支持 TCP、UDP 或两者同时转发；支持单端口及最多 4096 个端口的等长端口段映射。 |
 | IPv4 与 IPv6 | 支持 IPv4 → IPv4、IPv6 → IPv6、IPv4 → IPv6、IPv6 → IPv4。 |
@@ -32,6 +32,8 @@ PortBridge 将 nftables/flowtable 加速与 Go 代理结合：符合条件的同
 ## 快速开始
 
 如需交互式首次安装，请参阅[一键安装脚本](docs/ONECLICK.zh-CN.md)：自动选择最新稳定版，交互选择语言和持久严格 IP 白名单，并在本机网卡地址开放管理监听。这与下方默认仅回环访问的手动流程不同；已有实例不会被自动覆盖。
+
+一键脚本跟随 GitHub 最新已发布稳定版，不以本地检出或本文档版本为准。下方固定版本的命令要求 v2.5.0 发布附件已经上线；若附件不可用，请停止并使用与可下载版本匹配的文档，不要用源码归档代替预编译包。
 
 请在交互式 **root Bash 终端**执行（非 root 用户先运行 `sudo -i`）：
 
@@ -141,7 +143,7 @@ sudo cat /etc/portbridge/admin.token
 
 ## 创建第一条转发规则
 
-在 WebGUI 中添加规则，填写协议、监听地址/端口、目标主机/端口和数据面偏好。保存后先检查**实际运行状态**，再从应被允许访问转发端口的客户端测试流量。
+在 WebGUI 中添加规则，填写协议、监听地址/端口、目标主机/端口和数据面偏好。保存后检查规则状态及错误，再从获准访问的客户端测试流量。数据面列显示配置偏好，不是实际路径；运行细节请查看 `GET /api/status` 中的 `data_plane`、`go_running` 和 `kernel_state`。
 
 | 转发方向 | 数据面行为 |
 |---|---|
@@ -191,7 +193,7 @@ systemctl show portbridge -p ActiveState -p SubState -p Result -p NRestarts
 sudo journalctl -u portbridge -n 50 --no-pager
 ```
 
-正常应为 `ActiveState=active`、`SubState=running`，且没有持续重启。服务或规则异常时先检查日志，不要通过关闭 HTTPS、删除归属/恢复记录或放开管理白名单来掩盖问题。分享日志前请删除令牌及敏感运行信息。nftables 路径可使用 `sudo nft list table inet portbridge` 检查；Web 分别显示 Go 计数和内核尽力观测值，详见[统计边界](docs/MONITORING.zh-CN.md)。
+正常应为 `ActiveState=active`、`SubState=running`，且没有持续重启。服务或规则异常时先检查日志，不要通过关闭 HTTPS、删除归属/恢复记录或放开管理白名单来掩盖问题。分享日志前请删除令牌及敏感运行信息。nftables 路径可使用 `sudo nft list table inet portbridge` 检查；WebGUI 将 Go/nft 累计观测值合并为近似总量，实时速率分别显示，API 与 Prometheus 保留独立来源。详见[统计边界](docs/MONITORING.zh-CN.md)。
 
 ## 升级与卸载
 
@@ -207,7 +209,7 @@ sudo ./scripts/uninstall.sh
 
 ## 开发与文档
 
-源码构建要求**准确使用 Go 1.27.1**，依赖已放入 `vendor/`。在源码目录执行：
+本文的开发与发布流程使用 **Go 1.27.1**，源码安装器要求精确使用该工具链。模块声明的最低 Go 版本为 1.27.1，依赖已放入 `vendor/`。源码检出和 GitHub 自动生成的 Source code 归档不含预编译二进制。在源码目录执行：
 
 ```bash
 GOPROXY=off go test ./...

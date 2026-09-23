@@ -4,7 +4,7 @@
 
 ### Scope and forwarding path
 
-Forced `GO` rules and cross-family/wildcard-loopback fallback use the Go proxy. Same-family rules with `nftables preferred` use DNAT/SNAT and eligible flowtable acceleration. Go connection/session/rate/memory limits do not cover kernel forwarding. The WebGUI displays separate Go and best-effort kernel observations; see [monitoring](MONITORING.en-US.md).
+Forced `GO` rules and cross-family/wildcard-loopback fallback use the Go proxy. Eligible same-family rules with `nftables preferred` use DNAT/SNAT and optional flowtable acceleration; a firewall/admission failure does not guarantee automatic Go fallback. Go connection/session/rate/memory limits do not cover kernel forwarding. WebGUI combines Go payload and best-effort nft L3 cumulative observations into an approximate total, while displaying rates separately. API and Prometheus retain separate sources; see [monitoring](MONITORING.en-US.md).
 
 ```text
 UDP listener → SO_REUSEPORT workers → ReadBatch/recvmmsg
@@ -51,11 +51,11 @@ Throughput and latency depend on packet size, active flow count, batch size, wor
 
 Monitor received PPS, payload throughput, per-core CPU, allocations/GC, kernel/application drops and tail latency. Loopback and physical-NIC measurements are not interchangeable; overload latency should be considered separately from low-load latency.
 
-The Web control plane polls serially every 500 ms and reads snapshots; it does not perform per-packet work. It does not guarantee line-rate throughput or zero loss.
+The Web control plane reads snapshots with serialized polling, scheduling the next request about 500 ms after the previous one finishes; it does not perform per-packet work. It does not guarantee line-rate throughput or zero loss.
 
 ### Advanced options
 
-UDP GRO/GSO is not enabled by default. It needs ancillary-data handling, segment validation, MTU/PMTU checks and tested fallbacks; GSO chiefly helps compatible segments for one destination, not arbitrary mixed flows. Investigate it only after profiling.
+The Go dataplane does not implement UDP GRO/GSO enablement or expose a switch for it. Adding it would need ancillary-data handling, segment validation, MTU/PMTU checks and tested fallbacks; GSO chiefly helps compatible segments for one destination, not arbitrary mixed flows. Investigate it only after profiling.
 
 Check NIC RX/TX queues, RSS distribution, IRQ/CPU/NUMA placement and socket/softnet/NIC drop counters first. RPS/XPS and CPU affinity need workload-specific validation; the program does not pin every worker with `LockOSThread` by default.
 
@@ -65,7 +65,7 @@ nftables/flowtable integrates naturally with same-family NAT. Go batch forwardin
 
 ### 范围与转发路径
 
-强制 `GO` 规则、跨地址族以及通配回环 fallback 使用 Go 代理；同族且选择“nftables 优先”的规则使用 DNAT/SNAT 和符合条件的 flowtable 加速。Go 连接/会话/速率/内存限额不覆盖内核转发；Web 分别显示 Go 与内核尽力统计，详见[统计说明](MONITORING.zh-CN.md)。
+强制 `GO` 规则、跨地址族以及通配回环 fallback 使用 Go 代理；符合条件的同族“nftables 优先”规则使用 DNAT/SNAT 及可选 flowtable 加速，防火墙或准入失败不保证自动回退 Go。Go 连接/会话/速率/内存限额不覆盖内核转发。WebGUI 将 Go 有效载荷与 nft L3 累计观测值合并为近似总量，速率分别显示；API 与 Prometheus 保留独立来源，详见[统计说明](MONITORING.zh-CN.md)。
 
 - 每个 worker 拥有监听 socket、packet slab、batch message、会话表、epoll、时间轮和统计。一个 worker goroutine 同时处理入口及 connected 上游 socket，不按会话或数据报创建 goroutine。
 - IPv4/IPv6 socket 独立，同族和跨族沿用同一会话模型。
@@ -105,11 +105,11 @@ worker 预算在整条规则的监听端点间分摊；端点数超过预算时�
 
 关注接收 PPS、有效载荷吞吐、各核心 CPU、分配/GC、内核及应用丢包和尾部延迟。回环与物理网卡测量不能互相替代；过载与低负载延迟应分别考虑。
 
-Web 每 500 ms 串行轮询并读取快照，不参与逐包工作；不保证线速吞吐或零丢包。
+Web 串行轮询并读取快照，上一次请求完成后约 500 ms 发起下一次，不参与逐包工作；不保证线速吞吐或零丢包。
 
 ### 高阶选项
 
-默认不启用 UDP GRO/GSO。它们需要 ancillary data 处理、segment 校验、MTU/PMTU 检查和回退验证；GSO 主要适用于同目标的兼容分段，不能直接合并任意多 flow。应先通过 profile 确认收益。
+Go 数据面未实现 UDP GRO/GSO 启用逻辑，也没有对应配置开关。增加这类能力需要 ancillary data 处理、segment 校验、MTU/PMTU 检查和回退验证；GSO 主要适用于同目标的兼容分段，不能直接合并任意多 flow。应先通过 profile 确认收益。
 
 先检查 NIC 队列、RSS、IRQ/CPU/NUMA 分布及 socket/softnet/NIC 丢包；RPS/XPS 和绑核需要业务验证。程序默认不以 `LockOSThread` 固定每个 worker。
 

@@ -43,14 +43,27 @@ scrape_configs:
 
 替换示例主机名和证书路径，自签证书须先核对指纹并建立信任，不要用 `insecure_skip_verify` 绕过校验。将抓取主机的直连来源 IP 加入管理白名单。
 
-主要指标：
+全部 15 类指标如下。除运行时间外，均包含 `rule_id` 与 `protocol` 标签（配置规则的协议为 `tcp`、`udp` 或 `both`）。“附加标签”列是标签名，不是可直接执行的 PromQL 选择器；`source` 的值为 `go` 或 `nft`，`direction` 为 `up` 或 `down`，`hook` 标识被观测的 hook。
 
-- `portbridge_rule_bytes_total{rule_id,protocol,source="go|nft",direction="up|down"}`：按来源分别累计的观测字节。
-- `portbridge_rule_bytes_per_second`：最新字节速率估计，预热或不可用时不输出；乘八可转换为 bit/s。
-- `portbridge_rule_sample_available`、`portbridge_rule_rate_ready`、`portbridge_rule_sample_timestamp_seconds`：有效性和新鲜度。
-- `portbridge_nft_packets_total`、`portbridge_nft_hook_bytes_total`、`portbridge_nft_hook_packets_total`、`portbridge_nft_hooks_available`、`portbridge_nft_counter_resets_total`：内核观测与计数重置诊断。
-- `portbridge_go_active_tcp_connections`、`portbridge_go_active_udp_sessions`、`portbridge_go_udp_drops_total`：Go 资源与应用可见丢包。
-- `portbridge_rule_running`：管理器运行/风险标志，**不等于端到端业务健康**。
+| 指标 | 类型 | 附加标签 | 含义 |
+|---|---|---|---|
+| `portbridge_uptime_seconds` | gauge | 无，也没有规则标签 | Web Server 创建以来的秒数 |
+| `portbridge_rule_running` | gauge | 无 | 管理器运行/风险标志（0/1），不等于端到端健康 |
+| `portbridge_rule_bytes_total` | counter | `source`、`direction` | 累计观测值，分别为 Go 有效载荷或 nft L3 字节 |
+| `portbridge_rule_bytes_per_second` | gauge | `source`、`direction` | 最近字节速率估计，乘八可转换为 bit/s |
+| `portbridge_rule_sample_available` | gauge | `source` | 来源样本新鲜且可用（0/1） |
+| `portbridge_rule_rate_ready` | gauge | `source` | 已取得有效近期差值（0/1） |
+| `portbridge_rule_sample_timestamp_seconds` | gauge | `source` | 上次成功样本的 Unix 时间，未初始化为零 |
+| `portbridge_nft_packets_total` | counter | `direction` | conntrack L3 尽力观测包数 |
+| `portbridge_nft_hook_bytes_total` | counter | `hook` | hook 观测字节，不能跨 hook 相加 |
+| `portbridge_nft_hook_packets_total` | counter | `hook` | hook 观测包数，不是完整转发量 |
+| `portbridge_nft_hooks_available` | gauge | 无 | 自有 hook 样本新鲜且可用（0/1） |
+| `portbridge_nft_counter_resets_total` | counter | 无 | 检测到的内核计数下降次数 |
+| `portbridge_go_active_tcp_connections` | gauge | 无 | 当前 Go TCP 连接数 |
+| `portbridge_go_active_udp_sessions` | gauge | 无 | 当前 Go UDP 会话数 |
+| `portbridge_go_udp_drops_total` | counter | 无 | Go 应用可见丢包，不是网络整体丢包率 |
+
+字节速率只在两个来源有效标志均为 true 时输出。不可用时，字节/包累计值仍可能以旧值或初始零值存在，不能据此断言采样成功。hook 序列仅在曾观测到对应 hook 后出现，新鲜度还须检查 `portbridge_nft_hooks_available`。进程重启或规则运行态被移除后计数可重置，不是持久总量；采集器不自动创建告警规则。完整 JSON 流量结构见 [API 第 11.5 节](API.zh-CN.md#115-trafficsnapshot-与采样有效性)。
 
 以下 nft 速率序列在样本不可用或预热时不会输出：
 

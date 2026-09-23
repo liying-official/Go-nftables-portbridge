@@ -10,7 +10,7 @@ sudo bash scripts/install-oneclick.sh
 
 An interactive terminal is required. Before selection, prompts are English only: `1` selects English, `2` Simplified Chinese. Subsequent prompts use the selected language. The path above refers to a source checkout containing this script; the script can also be copied and run independently with Bash.
 
-The selected package sets the initial WebUI language. Every package includes both English and Simplified Chinese, switchable from the WebUI language menu without reinstalling.
+For v2.5.0 packages, the selected package sets the initial WebUI language; every package includes both English and Simplified Chinese, switchable from the WebUI language menu without reinstalling. The script selects the latest published stable release, not the local checkout version, and does not publish releases. Check the selected version before confirming; the matching release's documentation describes its UI and capabilities.
 
 ## Installation flow
 
