@@ -1,9 +1,9 @@
-# v2.4.9
+# v2.5.0
 
-- Bounded rule-scoped selective ACL proof and original-tuple flowtable isolation.
-- Fix login/logout/expired-token GUI recovery and display the running HTTPS certificate correctly.
-- Localize default GUI, installation prompts and current documentation for English and Simplified Chinese source packages; source compilation embeds the selected GUI.
-- Accept the actual single-device nft JSON string while retaining exact device-set verification.
-- Preserve `-1 + error` batch syscall failures as zero completed messages plus the original error; keep valid UDP sessions on temporary send pressure and count unsent packets without adding retry queues.
+- Introduce a sky-blue Tabler Core interface with locally served Core CSS/JS and Tabler Icons.
+- Switch English and Simplified Chinese in one WebUI, with responsive desktop tables, mobile rule cards and navigation.
+- Display combined approximate cumulative traffic and separate Go/nft real-time rates; retain authenticated Prometheus metrics.
+- Keep rule controls, HTTPS, direct-peer allowlisting, administrator authentication and CSRF protection unchanged.
+- Provide a Debian/Ubuntu one-click installer with architecture/language selection and signed-release verification.
 
-Published v2.4.9 source archives have Ed25519 detached signatures. They contain no prebuilt binaries; local builds are not automatically publisher-signed. See [forwarding limits](docs/forwarding-limits.md) before deployment.
+Release archives and SBOM are authenticated by signed SHA256SUMS. Each prebuilt package has a signed internal manifest; local rebuilds are not automatically publisher-signed. See [forwarding limits](docs/forwarding-limits.md) before deployment.

@@ -1,15 +1,15 @@
-# Go-nftables-portbridge API 参考
+# Go-nftables-portbridge API 参考 — v2.5.0
 
-**适用版本：v2.4.9**  
+**适用版本：v2.5.0**
+
 **语言：** [English](API.en-US.md) | **简体中文**  
-**最后静态核对：2026-09-20 · 项目工具链：Go 1.27.1**
 
 > [!IMPORTANT]
 > 所有管理 API 都要求管理员 Bearer Token。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
 
-本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.4.9 实现为准。
+本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.5.0 实现为准。
 
-源码基线：v2.4.9（`d8131555460075dd29bbb10b5dc282f23dbed438`）。示例使用文档占位值，不包含真实凭据或部署信息。
+示例使用文档占位值，不包含真实凭据或部署信息。
 
 ## 目录
 
@@ -29,14 +29,14 @@
 - [14. Python 标准库客户端示例](#14-python-标准库客户端示例)
 - [15. 并发、重试与运维边界](#15-并发重试与运维边界)
 - [16. 当前 API 不提供的能力](#16-当前-api-不提供的能力)
+- [17. Prometheus 指标](#17-prometheus-指标)
 - [实现依据与源码链接](#实现依据与源码链接)
-- [文档验证说明](#文档验证说明)
 
 ---
 
 ## 1. 接口范围与速查
 
-当前版本显式注册 **8 个管理 API 路由**，统一以 `/api/` 开头，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
+当前版本显式注册 **8 个 JSON 管理 API 路由**，统一以 `/api/` 开头；另提供受保护的 `GET /metrics` Prometheus 接口，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
 
 | 方法 | 路径 | 作用 | 成功状态 | CSRF | 请求 JSON |
 |---|---|---|---:|---|---|
@@ -603,7 +603,7 @@ Rule 共 **27 个 JSON 字段**。下列“默认”指 API 创建/替换时经�
 
 超过 `udp_packet_buffer_size` 被截断的数据报会被丢弃并计入应用丢包，不会转发截断后的部分内容。socket 缓冲是申请值，不是保证获得的内核值；状态 API 不返回实际 socket 缓冲大小或内存预算占用。[^udp-implementation][^udp-doc]
 
-v2.4.9 对瞬态 UDP 发送压力保留有效会话，但未发送的包仍计为丢弃；这些参数不提供“过载零丢包”保证，也不创建无限重试队列。[^udp-doc]
+v2.5.0 对瞬态 UDP 发送压力保留有效会话，但未发送的包仍计为丢弃；这些参数不提供“过载零丢包”保证，也不创建无限重试队列。[^udp-doc]
 
 ### 10.4 端口区间
 
@@ -691,6 +691,7 @@ target_cidr_allowlist
 |---|---|---|
 | `rule` | Rule | 该运行态记录关联的规则对象；可能不是持久配置中的普通规则 |
 | `stats` | StatsSnapshot | 运行标志、错误与 Go 路径统计 |
+| `traffic` | TrafficSnapshot | 每秒后台采样的 Go、nft 尽力统计、hook counter、每规则实时速率及有效性标志；见[统计说明](MONITORING.zh-CN.md) |
 | `data_plane` | string | 运行/风险视角的数据面标签，与 `rule.data_plane` 是不同字段 |
 | `go_running` | boolean | 该逻辑规则是否至少存在一个已登记的 Go runner；不是所有派生入口逐一健康证明 |
 | `kernel_state` | string | 管理器对内核状态证据的分类，见下表 |
@@ -748,6 +749,8 @@ target_cidr_allowlist
 
 规则 ID 保留时，停止/再次启动通常保留累计计数；完全删除并清理该规则或重启进程后不能指望延续原计数。API 没有计数器重置接口，也不提供永久历史。[^manager][^stats]
 
+`traffic.go` 补充活动 TCP 的实时观测；`stats.bytes_up/bytes_down` 仍保持上述复制结束后汇总的语义。nft 使用 conntrack accounting 尽力采样，hook counter 单列；`available=false` 或 `rate_ready=false` 时不能把速率当作零。详见[统计与 Prometheus](MONITORING.zh-CN.md)。
+
 ### 11.4 `running=true` 的风险语义
 
 当运行环境无法证明旧内核路径为空时，保存禁用规则可能出现以下**风险状态响应片段**：
@@ -780,7 +783,7 @@ target_cidr_allowlist
 }
 ```
 
-没有 `code`、`message`、`details`、`errors[]` 或 `request_id`。v2.4.9 中，HTTP 处理器的固定鉴权/CSRF/JSON 错误仍有中文，配置校验等错误为英文；英文 GUI 通过前端 `translateAPIError` 翻译显示。**API 错误文本并不保证全英文，也没有 Accept-Language 协商。**[^auth][^json][^gui]
+没有 `code`、`message`、`details`、`errors[]` 或 `request_id`。v2.5.0 中，HTTP 处理器的固定鉴权/CSRF/JSON 错误仍有中文，配置校验等错误为英文。双语 GUI 在选择 English 时翻译已知消息，切换界面语言不改变 API 协议。**API 错误文本并不保证全英文，也没有 Accept-Language 协商。**[^auth][^json][^gui]
 
 ### 12.2 常见状态码
 
@@ -1003,7 +1006,7 @@ CLI 主入口只读取 bootstrap 和状态，不创建、更新、删除或轮�
 
 ```python
 #!/usr/bin/env python3
-"""Go-nftables-portbridge v2.4.9 client; CLI performs read-only calls."""
+"""Go-nftables-portbridge v2.5.0 client; CLI performs read-only calls."""
 from __future__ import annotations
 
 import argparse
@@ -1253,7 +1256,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 | 远程重启、停止服务、热加载证书 | 未实现；本机运维操作 |
 | API 上传证书/私钥、ACME 签发 | 未实现；设置接口只接受服务器本地文件路径 |
 | 日志查询/下载、SSE、WebSocket、事件订阅 | 未实现 |
-| `/metrics`、Prometheus 输出、业务 `/healthz` | 本路由表未实现；状态 API 也不是独立匿名健康端点 |
+| 匿名业务 `/healthz` | 未实现；状态 API 和 `/metrics` 均需要管理员认证 |
 | 统计历史、流量计数重置、分页/筛选 | 未实现 |
 | 查询软件版本、动态 OpenAPI/Swagger 文档 | 本路由表未实现；`/api/bootstrap.name` 不是版本号 |
 | 读取/修改全局资源限制、conntrack mark、flowtable 总开关 | 未通过 API 暴露；在本地完整配置中设置 |
@@ -1266,7 +1269,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 
 | 本地字段 | 源码默认/范围 | API 可见性 |
 |---|---|---|
-| `version` | 配置 schema 版本 `2`，不是软件发布版本 2.4.9 | GET config 不返回 |
+| `version` | 配置 schema 版本 `2`，不是软件发布版本 2.5.0 | GET config 不返回 |
 | `web.admin_token_sha256` | 管理员 Token 字符串的 SHA-256 | 不返回，不能通过 settings 设置 |
 | `web.require_https` | 安装流程设为 true，原始 Default 为 false | 只通过 `https.required` 读取；settings 不接受 |
 | `web.allow_unsafe_all_address_acl` | 默认 false | 不返回/不可通过 API 修改；严格模式仍拒绝 `/0` |
@@ -1278,9 +1281,13 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 
 ---
 
+## 17. Prometheus 指标
+
+`GET /metrics` 共用管理 HTTPS、来源白名单及 Bearer 认证，GET 不要求 CSRF；成功返回 `text/plain; version=0.0.4; charset=utf-8`，不是 JSON。指标不输出规则名、转发端点或令牌，采集缺失时省略实时速率并通过有效性指标告警。配置示例、字段与 flowtable 尽力统计边界见[统计说明](MONITORING.zh-CN.md)。
+
 ## 实现依据与源码链接
 
-以下链接按本文位于仓库 `docs/` 目录计算，并指向 v2.4.9 对应实现。引用采用文件级链接，避免行号变化导致错误定位；正文脚注用于区分服务端已有行为与本文明确标记的客户端建议。
+以下链接按本文位于仓库 `docs/` 目录计算，并指向 v2.5.0 对应实现。引用采用文件级链接，避免行号变化导致错误定位；正文脚注用于区分服务端已有行为与本文明确标记的客户端建议。
 
 [^routes]: [`internal/web/server.go`](../internal/web/server.go)。完整路由注册、根页面与静态资源兜底。
 [^web-start]: [`internal/web/server.go`](../internal/web/server.go)。监听地址、原生 TLS、HTTP 时限与 Header 上限。
@@ -1315,13 +1322,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 [^udp-implementation]: [`internal/proxy/udp.go`](../internal/proxy/udp.go)。自动 worker、UDP 包过滤/丢弃/发送计数与维护汇总。
 [^budgets]: [`internal/proxy/budget.go`](../internal/proxy/budget.go)。跨 runner/worker/端口/地址族共享来源预算与 UDP 令牌桶。
 [^udp-doc]: [`docs/udp-dataplane.md`](udp-dataplane.md) 的 Scope、Defaults and capacity boundaries；[`README.md`](../README.md)。Go 与内核路径计数/预算边界、默认值及批量发送错误语义。
-[^gui]: [`internal/web/static/app.js`](../internal/web/static/app.js)。API 客户端包装、bootstrap、500 ms 串行状态轮询、完整设置/Rule 提交、前端错误翻译与本地退出。
+[^gui]: [`internal/web/static/app.js`](../internal/web/static/app.js) 和 [`i18n.js`](../internal/web/static/i18n.js)。API 客户端包装、bootstrap、500 ms 串行状态轮询、完整设置/Rule 提交、语言选择、已知错误翻译与本地退出。
 [^cli]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go)。默认配置/Token 路径与相关启动参数。
 [^deployment]: [`README.md`](../README.md)、[`packaging/portbridge.service`](../packaging/portbridge.service)。安装后的原生 HTTPS 强制策略、证书信任及回环恢复说明。
 [^main-refresh]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go)。初始化、每 30 秒读取 Store 快照并刷新 ACL/规则、退出信号。
-
-## 文档验证说明
-
-本文档已针对 v2.4.9 源码进行静态核对，覆盖路由注册、请求/响应字段、默认值、校验、鉴权、Markdown 链接、JSON 解析、Bash/Python 示例语法及离线客户端边界测试。本次文档检查未启动服务、未对服务器执行 curl 写操作，也未重新运行 Go 集成测试。
-
-该验证用于确认 **API 文本与实现的一致性**，不等同于 nftables/conntrack 数据面的完整环境认证，也不构成吞吐、零丢包、主机加固或任意防火墙环境的保证。

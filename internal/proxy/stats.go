@@ -22,6 +22,7 @@ type Stats struct {
 	running   bool
 	startedAt time.Time
 	lastError string
+	liveTCP   map[*tcpMeter]struct{}
 }
 
 type StatsSnapshot struct {

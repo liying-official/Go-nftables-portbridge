@@ -63,6 +63,7 @@ gate vet "$GO_BIN" vet ./...
 gate build env CGO_ENABLED=0 "$GO_BIN" build -trimpath -ldflags="-X main.version=$(cat VERSION)" -o "$PB_VERIFY_OUT/portbridge" ./cmd/portbridge
 gate proxy-test-binary "$GO_BIN" test -c -o "$PB_VERIFY_OUT/proxy.test" ./internal/proxy
 gate proxy-race-test-binary "$GO_BIN" test -race -c -o "$PB_VERIFY_OUT/proxy-race.test" ./internal/proxy
+gate metrics-live "$GO_BIN" tool test2json -t -p portbridge/internal/proxy env PB_METRICS_PARENT_NS="$(readlink /proc/self/ns/net)" unshare --net "$PB_VERIFY_OUT/proxy.test" -test.v -test.run '^TestNFTTelemetryLive$' -test.count=1 -test.timeout=45s
 gate udp-interfaces "$GO_BIN" tool test2json -t -p portbridge/internal/proxy python3 ./scripts/run-udp-interfaces.py "$PB_VERIFY_OUT/proxy.test" -test.v -test.run '^TestReview247UDPRealInterfaceScopeAndAsymmetry$' -test.count=3 -test.timeout=3m
 gate udp-interfaces-race "$GO_BIN" tool test2json -t -p portbridge/internal/proxy python3 ./scripts/run-udp-interfaces.py "$PB_VERIFY_OUT/proxy-race.test" -test.v -test.run '^TestReview247UDPRealInterfaceScopeAndAsymmetry$' -test.count=3 -test.timeout=3m
 gate clean-go "$GO_BIN" tool test2json -t -p portbridge/internal/proxy ./scripts/test-clean-go-netns.sh "$PB_VERIFY_OUT/proxy.test" -test.v -test.run '^TestReviewClean' -test.count=10 -test.timeout=3m
@@ -93,9 +94,10 @@ required |= {"TestNFTSelectiveACL"+suffix for suffix in ["NATAndDirections","Unk
 required.add("TestNFTSelectiveTrafficIsolation")
 required |= {"TestNFTFlowtableDeviceJSONShapes", "TestUDPTransientSendPressurePreservesSession", "TestUDPFatalSendErrorStillClosesSession"}
 required.add("TestUDPBatchSyscallFailureSentinel")
-separate={"TestReviewCleanForcedGoWithoutNFT","TestReviewCleanGoSocketMatrix","TestNFTRecoveryProcSubsetIdentity","TestNFTRecoveryBootBindComponent","TestReview247UDPRealInterfaceScopeAndAsymmetry"}
+required |= {"TestTrafficSamplerRatesResetAndOutage", "TestNFTHookCounterIdentityAndIntegers", "TestNFTConntrackAccountingCounters", "TestTrafficSamplerStaleDoesNotReportZeroRate", "TestTrafficSamplerDoesNotBlockRuntime", "TestTCPMeterTracksLiveSpliceWithoutDoubleCounting", "TestMetricsUsesManagementAuthenticationAndACL", "TestMetricSamplesAndPrivateLabels"}
+separate={"TestReviewCleanForcedGoWithoutNFT","TestReviewCleanGoSocketMatrix","TestNFTRecoveryProcSubsetIdentity","TestNFTRecoveryBootBindComponent","TestReview247UDPRealInterfaceScopeAndAsymmetry","TestNFTTelemetryLive"}
 assert not counts["fail"] and skips <= separate and required <= roots,(counts,required-roots,skips-separate)
-for label,expected,n in [("clean-go",{"TestReviewCleanForcedGoWithoutNFT","TestReviewCleanGoSocketMatrix"},10),("proc-subset",{"TestNFTRecoveryProcSubsetIdentity"},1),("boot-bind-component",{"TestNFTRecoveryBootBindComponent"},1)]:
+for label,expected,n in [("clean-go",{"TestReviewCleanForcedGoWithoutNFT","TestReviewCleanGoSocketMatrix"},10),("proc-subset",{"TestNFTRecoveryProcSubsetIdentity"},1),("boot-bind-component",{"TestNFTRecoveryBootBindComponent"},1),("metrics-live",{"TestNFTTelemetryLive"},1)]:
     passed=collections.Counter(); bad=[]
     for line in (out/(label+".stdout")).read_text().splitlines():
         e=json.loads(line)
@@ -140,5 +142,5 @@ print(json.dumps({"events":counts,"required_selected":sorted(required),"accept_n
 PY
 echo "Review logs in $PB_VERIFY_OUT. Runtime validation is separate from release approval."
 [[ $failed == 0 ]] || exit 1
-echo "BLOCKED: v2.4.9 bounded selective-ACL support does not certify arbitrary stateful/side-effecting firewall policies, actual reboot or the complete original-user systemd unit. This unsigned candidate is not release-approved." >&2
+echo "BLOCKED: v2.5.0 bounded selective-ACL support does not certify arbitrary stateful/side-effecting firewall policies, actual reboot or the complete original-user systemd unit. This unsigned candidate is not release-approved." >&2
 exit 2

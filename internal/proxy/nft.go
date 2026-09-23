@@ -88,6 +88,7 @@ type commandNFTBackend struct {
 	cleanProbe       func() error
 	cleanVerified    bool
 	configErr        error
+	metricsEpoch     uint64
 }
 
 func CleanupNFT(logger *slog.Logger, nftConfig ...config.NFTConfig) error {
@@ -296,6 +297,7 @@ func (n *commandNFTBackend) replaceObjects(specs, retired []nftRuleSpec, keepFlo
 	n.initialized = true
 	n.devicesKey = devicesKey
 	n.fingerprint = observed.fingerprint
+	n.metricsEpoch++
 	n.appliedSpecKey = specKey
 	n.appliedActiveKey = activeKey
 	n.activeSpecs = append([]nftRuleSpec(nil), specs...)
@@ -332,6 +334,7 @@ func (n *commandNFTBackend) clearAppliedState() {
 	n.initialized = false
 	n.devicesKey = ""
 	n.fingerprint = ""
+	n.metricsEpoch++
 	n.appliedSpecKey = ""
 	n.appliedActiveKey = ""
 	n.activeSpecs = nil

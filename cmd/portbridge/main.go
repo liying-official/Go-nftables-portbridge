@@ -184,6 +184,7 @@ func main() {
 	}
 	proxyManager.SetRuntimeConfig(cfg.Limits, cfg.NFT)
 	proxyManager.Apply(cfg.Rules)
+	proxyManager.StartTelemetry()
 
 	webServer, err := webui.New(store, aclManager, proxyManager, logger, tokenPath)
 	if err != nil {

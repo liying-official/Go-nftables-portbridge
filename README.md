@@ -1,4 +1,4 @@
-# Go-nftables-portbridge
+# Go-nftables-portbridge — v2.5.0
 
 [![Release](https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge)](https://github.com/liying-official/Go-nftables-portbridge/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -18,15 +18,28 @@ PortBridge combines nftables/flowtable acceleration for eligible same-family tra
 | Capability | What you get |
 |---|---|
 | Web GUI and API | Create, edit, enable and delete rules; configure settings; inspect runtime state; rotate the administrator token. |
+| Bilingual Tabler UI | Switch English / 简体中文 in the same interface, with sky-blue cards, responsive rule tables and mobile navigation. Tabler Core and Icons are served locally. |
 | TCP / UDP | Forward TCP, UDP or both; map individual ports or equal-length ranges of up to 4096 ports. |
 | IPv4 and IPv6 | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4. |
 | Two data planes | Prefer nftables DNAT/SNAT with optional flowtable acceleration, or explicitly select the Go TCP/UDP proxy. |
-| DNS and monitoring | Custom DNS servers, 30-second domain-target refresh, and Go-proxy traffic/session/drop statistics. |
+| DNS and monitoring | Custom DNS servers, 30-second domain-target refresh, per-rule rates, Go statistics and best-effort nft/flowtable observations; [Prometheus `/metrics`](docs/MONITORING.en-US.md). |
 | Secure installation | Signed, localized amd64/arm64 release packages; no Go compiler required; HTTPS management and a dedicated systemd service account. |
 
-**Know the boundary:** the management ACL does not protect forwarding ports. Go-proxy budgets and Web traffic counters do not automatically apply to nftables traffic. Flowtable eligibility depends on kernel support and the surrounding firewall; an ineligible rule is not guaranteed to fall back to Go. See [forwarding limits](docs/forwarding-limits.md) before deploying alongside other firewall/NAT software.
+The language menu is available on the sign-in page, dashboard and rule dialog. Both release languages contain the same bilingual WebUI; the package language sets its initial language and the installation/documentation language. The browser remembers only the language preference in local storage; administrator tokens remain in session storage.
+
+**Know the boundary:** the management ACL does not protect forwarding ports. Go-proxy budgets do not automatically apply to nftables traffic. The UI combines Go payload and best-effort nft L3 cumulative counters into an approximate display total; real-time rates and API/Prometheus sources remain separate. Flowtable sampling can lag or miss short flows. Flowtable eligibility depends on kernel support and the surrounding firewall; an ineligible rule is not guaranteed to fall back to Go. See [forwarding limits](docs/forwarding-limits.md) before deploying alongside other firewall/NAT software.
 
 ## Quick start
+
+For an interactive fresh installation, see the [one-click installer](docs/ONECLICK.en-US.md). It selects the latest stable release, asks for language and a persistent strict IP allowlist, and exposes management on local interface addresses. This differs from the loopback-only manual procedure below. Existing installations are never overwritten automatically.
+
+Run in an interactive **root Bash terminal** (use `sudo -i` first if necessary):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/main/scripts/install-oneclick.sh)
+```
+
+This downloads and executes the current `main` script. Only run it if you trust this repository; download and inspect the script first if needed. A download error or no installer prompts is not a successful installation.
 
 ### 1. Prepare the server
 
@@ -41,11 +54,9 @@ sudo apt-get install -y --no-install-recommends ca-certificates curl openssh-cli
 
 Other distributions need equivalent packages installed through their own package manager. On non-APT systems, preinstall all dependencies: the installer uses `apt-get` if nftables or conntrack is missing.
 
-Compatibility history: preceding releases were tested on Debian 13 / Ubuntu 26.04; this version was revalidated on Debian 13, not Ubuntu. ARM64 received QEMU user-mode checks, not native ARM64 systemd/kernel acceptance. Other compatible Linux distributions may be tested and deployed independently.
-
 ### 2. Download, verify and install
 
-The block below installs the **English v2.4.9 prebuilt release**, selecting your CPU architecture automatically. Run the entire block on the server. Root and sudo users are both supported; **Go is not required**. For an existing installation, read [Upgrade and uninstall](#upgrade-and-uninstall) first.
+The block below installs the **English v2.5.0 prebuilt release**, selecting your CPU architecture automatically. Run the entire block on the server. Root and sudo users are both supported; **Go is not required**. For an existing installation, read [Upgrade and uninstall](#upgrade-and-uninstall) first.
 
 ```bash
 bash <<'BASH'
@@ -57,13 +68,13 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH=arm64 ;;
   *) echo 'Unsupported CPU architecture' >&2; exit 1 ;;
 esac
-NAME="portbridge-v2.4.9-linux-${ARCH}-en-US"
-BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.4.9'
+NAME="portbridge-v2.5.0-linux-${ARCH}-en-US"
+BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.0'
 WORK=$(mktemp -d)
 cd "$WORK"
 for FILE in "$NAME.tar.gz" SHA256SUMS SHA256SUMS.sig; do
   curl -q -fL --proto '=https' --proto-redir '=https' \
-    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.4.9"
+    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.0"
 done
 printf '%s\n' 'portbridge-release-v2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVc6m1afFOM3gsLO6VXuLyAlHbkvBP83wlMEqArW/0k' > release-signers
 ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 \
@@ -76,7 +87,7 @@ tar -xzf "$NAME.tar.gz" --strip-components=1 -C package
 cd package
 test -x "dist/go-nftables-portbridge-linux-$ARCH"
 if (( EUID == 0 )); then ./scripts/install.sh; else sudo ./scripts/install.sh; fi
-test "$(/usr/local/bin/portbridge -version)" = '2.4.9'
+test "$(/usr/local/bin/portbridge -version)" = '2.5.0'
 systemctl is-active --quiet portbridge
 test "$(systemctl show portbridge -p SubState --value)" = running
 systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
@@ -86,16 +97,16 @@ BASH
 
 This verifies the signed checksum list **before extracting or running the archive**, checks the selected package hash, and invokes the bundled installer. The installer then verifies the pinned release key, internal manifest, source/script hashes, binary hash and version. Any failed check stops the flow; never bypass it.
 
-The final commands require version `2.4.9` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
+The final commands require version `2.5.0` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
 
 #### Release files and signature trust
 
-Use the attached assets on the [v2.4.9 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.4.9), not GitHub's automatically generated **Source code** archives.
+Use the attached assets on the [v2.5.0 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.0), not GitHub's automatically generated **Source code** archives.
 
 | CPU | English package | Simplified Chinese package |
 |---|---|---|
-| amd64 / x86_64 | `portbridge-v2.4.9-linux-amd64-en-US.tar.gz` | `portbridge-v2.4.9-linux-amd64-zh-CN.tar.gz` |
-| arm64 / aarch64 | `portbridge-v2.4.9-linux-arm64-en-US.tar.gz` | `portbridge-v2.4.9-linux-arm64-zh-CN.tar.gz` |
+| amd64 / x86_64 | `portbridge-v2.5.0-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.0-linux-amd64-zh-CN.tar.gz` |
+| arm64 / aarch64 | `portbridge-v2.5.0-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.0-linux-arm64-zh-CN.tar.gz` |
 
 The release also includes `SHA256SUMS`, `SHA256SUMS.sig` and `SBOM`. The quick start downloads only your selected archive and the two checksum files. It does not need the other three packages or the SBOM to install. There is no separate per-archive `.tar.gz.sig` or `release-signers` asset in this release.
 
@@ -105,7 +116,7 @@ The verification block pins the public key instead of trusting a key downloaded 
 SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o
 ```
 
-Signing identity: `portbridge-release-v2`. Signature namespace: `portbridge-release`. A signature establishes integrity and origin relative to the trusted key, not that a deployment is vulnerability-free. Version `2.4.9` is deliberately pinned; use the matching instructions and trust material when upgrading.
+Signing identity: `portbridge-release-v2`. Signature namespace: `portbridge-release`. A signature establishes integrity and origin relative to the trusted key, not that a deployment is vulnerability-free. Version `2.5.0` is deliberately pinned; use the matching instructions and trust material when upgrading.
 
 Do not edit files inside the verified package before installation, including its README files. Those files are covered by the internal signed manifest. Repacking or modifying a release requires regenerated manifests, checksums and publisher signatures.
 
@@ -180,7 +191,7 @@ systemctl show portbridge -p ActiveState -p SubState -p Result -p NRestarts
 sudo journalctl -u portbridge -n 50 --no-pager
 ```
 
-Expect `ActiveState=active`, `SubState=running`, and no ongoing restart loop. Inspect logs when a service or rule is unhealthy; do not disable HTTPS, erase ownership/recovery records or open the management allowlist to work around a failure. Redact tokens and operational details before sharing logs. For nftables-path inspection, use `sudo nft list table inet portbridge`; Go-proxy Web counters are not kernel-path counters.
+Expect `ActiveState=active`, `SubState=running`, and no ongoing restart loop. Inspect logs when a service or rule is unhealthy; do not disable HTTPS, erase ownership/recovery records or open the management allowlist to work around a failure. Redact tokens and operational details before sharing logs. For nftables-path inspection, use `sudo nft list table inet portbridge`; The WebGUI separates Go counters from best-effort kernel observations; see [monitoring boundaries](docs/MONITORING.en-US.md).
 
 ## Upgrade and uninstall
 

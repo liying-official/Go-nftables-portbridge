@@ -1,5 +1,7 @@
 {
  "Invalid VERSION: ": "VERSION 无效：",
+ "Refusing to overwrite release output: ": "拒绝覆盖已有发布制品：",
+ "Release sources must contain only regular files and directories": "发布源码只能包含常规文件和目录",
  "Invalid SOURCE_DATE_EPOCH: ": "SOURCE_DATE_EPOCH 无效：",
  "Invalid PORTBRIDGE_SOURCE_REVISION: expected a 40-character Git commit hash": "PORTBRIDGE_SOURCE_REVISION 无效：需要 40 位 Git 提交哈希",
  "Refusing unsafe release directory: ": "拒绝不安全的发布目录：",
@@ -30,7 +32,7 @@
  "Evidence and cache: $PB_VERIFY_OUT (retained for review; not a release artifact)": "证据与缓存：$PB_VERIFY_OUT（保留供审核，不属于发布制品）",
  "Refusing mutation outside a fresh network namespace.": "拒绝在新建网络命名空间之外执行修改。",
  "Review logs in $PB_VERIFY_OUT. Runtime validation is separate from release approval.": "请检查 $PB_VERIFY_OUT 中的日志。运行验证与发布批准是独立结论。",
- "BLOCKED: v2.4.9 bounded selective-ACL support does not certify arbitrary stateful/side-effecting firewall policies, actual reboot or the complete original-user systemd unit. This unsigned candidate is not release-approved.": "阻断：v2.4.9 有界选择性 ACL 支持不代表已认证任意有状态或有副作用的防火墙策略、真实重启或原始用户的完整 systemd 单元。此未签名候选版未获发布批准。",
+ "BLOCKED: v2.5.0 bounded selective-ACL support does not certify arbitrary stateful/side-effecting firewall policies, actual reboot or the complete original-user systemd unit. This unsigned candidate is not release-approved.": "阻断：v2.5.0 有界选择性 ACL 支持不代表已认证任意有状态或有副作用的防火墙策略、真实重启或原始用户的完整 systemd 单元。此未签名候选版未获发布批准。",
  "absolute proxy test binary required": "需要测试二进制绝对路径",
  "absolute compiled proxy test executable required": "需要已编译测试程序的绝对路径",
  "absolute Go path required": "需要 Go 的绝对路径"

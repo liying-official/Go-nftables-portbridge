@@ -34,14 +34,16 @@ type Manager struct {
 	nftInitialized bool
 	nftMark        uint32
 	nftFlowtable   bool
+	telemetry      *trafficCollector
 }
 
 type RuleRuntime struct {
-	Rule        config.Rule   `json:"rule"`
-	Stats       StatsSnapshot `json:"stats"`
-	DataPlane   string        `json:"data_plane"`
-	GoRunning   bool          `json:"go_running"`
-	KernelState string        `json:"kernel_state"`
+	Rule        config.Rule     `json:"rule"`
+	Stats       StatsSnapshot   `json:"stats"`
+	DataPlane   string          `json:"data_plane"`
+	GoRunning   bool            `json:"go_running"`
+	KernelState string          `json:"kernel_state"`
+	Traffic     TrafficSnapshot `json:"traffic"`
 }
 
 func NewManager(logger *slog.Logger, dnsServers ...[]string) *Manager {
@@ -69,6 +71,7 @@ func newManagerWithNFT(logger *slog.Logger, resolver *DNSResolver, nft nftBacken
 		nft:           nft,
 		nftMark:       defaults.NFT.ConntrackMark,
 		nftFlowtable:  defaults.NFT.EnableFlowtable,
+		telemetry:     newTrafficCollector(),
 	}
 }
 
@@ -370,6 +373,9 @@ func logGoPathStarted(logger *slog.Logger, path goPath) {
 }
 
 func (m *Manager) Stop() {
+	if m.telemetry != nil {
+		m.telemetry.stop()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, r := range m.runners {
@@ -408,7 +414,11 @@ func (m *Manager) Runtime() []RuleRuntime {
 				break
 			}
 		}
-		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id], GoRunning: goRunning, KernelState: kernelState})
+		traffic := TrafficSnapshot{}
+		if m.telemetry != nil {
+			traffic = m.telemetry.snapshot(id, m.stats[id])
+		}
+		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id], GoRunning: goRunning, KernelState: kernelState, Traffic: traffic})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Rule.Name == out[j].Rule.Name {

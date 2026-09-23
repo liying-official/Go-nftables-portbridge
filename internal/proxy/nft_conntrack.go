@@ -152,11 +152,20 @@ type conntrackXMLLayer4 struct {
 	Destination string `xml:"dport"`
 }
 type conntrackXMLMeta struct {
-	Direction string             `xml:"direction,attr"`
-	L3        conntrackXMLLayer3 `xml:"layer3"`
-	L4        conntrackXMLLayer4 `xml:"layer4"`
-	Mark      string             `xml:"mark"`
-	Zone      string             `xml:"zone"`
+	Direction string                `xml:"direction,attr"`
+	L3        conntrackXMLLayer3    `xml:"layer3"`
+	L4        conntrackXMLLayer4    `xml:"layer4"`
+	Mark      string                `xml:"mark"`
+	Zone      string                `xml:"zone"`
+	ID        string                `xml:"id"`
+	Counters  *conntrackXMLCounters `xml:"counters"`
+}
+
+// Optional accounting is consumed only by telemetry, never by ownership or
+// retirement decisions. Missing counters do not change forwarding semantics.
+type conntrackXMLCounters struct {
+	Packets string `xml:"packets"`
+	Bytes   string `xml:"bytes"`
 }
 type conntrackXMLFlow struct {
 	Meta []conntrackXMLMeta `xml:"meta"`

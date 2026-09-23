@@ -1,0 +1,45 @@
+{
+  "core": {
+    "version": "1.5.1",
+    "tarball": "https://registry.npmjs.org/@tabler/core/-/core-1.5.1.tgz",
+    "integrity": "sha512-PI9rJq4H4lBh53YP/J+m5Uz6lqVQbsGPmWCMN34IP4KQQ/wy28YMO6a3Eiz1cQHdFFr+3MlU3yYhXdzvFGJfqw=="
+  },
+  "icons": {
+    "version": "3.48.0",
+    "tarball": "https://registry.npmjs.org/@tabler/icons/-/icons-3.48.0.tgz",
+    "integrity": "sha512-lQk06gVHNVBnJp0UOgtth54mcZBJM7rdYKsAxKOProj1bbSAx+/xiuOWfHlyvgdL3M+Y+I0HINrjHa3ygp8eXQ==",
+    "selected": [
+      "activity.svg",
+      "alert-triangle.svg",
+      "arrow-down.svg",
+      "arrow-up.svg",
+      "arrows-exchange.svg",
+      "arrows-transfer-up-down.svg",
+      "check.svg",
+      "chevron-down.svg",
+      "external-link.svg",
+      "info-circle.svg",
+      "key.svg",
+      "language.svg",
+      "layout-dashboard.svg",
+      "logout.svg",
+      "menu-2.svg",
+      "network.svg",
+      "pencil.svg",
+      "plus.svg",
+      "server.svg",
+      "settings.svg",
+      "shield-lock.svg",
+      "trash.svg",
+      "x.svg"
+    ]
+  },
+  "bundled": {
+    "bootstrap": "5.3.8",
+    "popper": "2.11.8"
+  },
+  "files": {
+    "tabler.min.css": "6aa5677e9cfc2620405bf97a98074ba43ff06a411cb35c5337acfb56d124c273",
+    "tabler.min.js": "d4c4c2768f166c308391e0cea44db593056f12b84a4eeef46d55e35ca46d6e60"
+  }
+}

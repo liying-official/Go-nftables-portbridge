@@ -1,10 +1,10 @@
-# Go-nftables-portbridge v2.4.9 — UDP dataplane / UDP 数据面
+# Go-nftables-portbridge v2.5.0 — UDP dataplane / UDP 数据面
 
 ## English
 
 ### Scope and forwarding path
 
-Forced `GO` rules and cross-family/wildcard-loopback fallback use the Go proxy. Same-family rules with `nftables preferred` use DNAT/SNAT and eligible flowtable acceleration. Go connection/session/rate/memory limits and Web proxy counters do not cover kernel forwarding; use nftables, conntrack and firewall controls for that path.
+Forced `GO` rules and cross-family/wildcard-loopback fallback use the Go proxy. Same-family rules with `nftables preferred` use DNAT/SNAT and eligible flowtable acceleration. Go connection/session/rate/memory limits do not cover kernel forwarding. The WebGUI displays separate Go and best-effort kernel observations; see [monitoring](MONITORING.en-US.md).
 
 ```text
 UDP listener → SO_REUSEPORT workers → ReadBatch/recvmmsg
@@ -15,7 +15,7 @@ UDP listener → SO_REUSEPORT workers → ReadBatch/recvmmsg
 - Each worker owns its listener, packet slabs, batch messages, flow/session table, epoll instance, timing wheel and statistics. One worker goroutine services its listener and connected upstream sockets; there is no per-session or per-packet goroutine.
 - IPv4 and IPv6 use separate sockets. Same-family and cross-family forwarding use the same session model.
 - Packet/message/address structures are preallocated and reused. Mixed-session batches are grouped using reusable packet indices; `netip.AddrPort` is the explicit-bind session key; wildcard keys also include local destination and necessary interface scope. Empty datagrams remain budgeted packets.
-- The documented local `x/net/internal/socket` patch reuses a pre-populated UDP address and IP backing array; see [vendored patches](../VENDOR_PATCHES.md).
+- The `x/net/internal/socket` patch reuses a pre-populated UDP address and IP backing array; see [vendored patches](../VENDOR_PATCHES.md).
 - Session lookup is worker-local. Source accounting uses 64 rule-level shards shared across Go workers, port ranges, address families and fallback runners. A packet holds one short source-budget lock, never across socket I/O or creation.
 - Source session/rate reservations are rolled back on creation failure and released on timeout/shutdown. Time-based refill uses monotonic elapsed time. Rate limits are token buckets with bounded bursts, not fixed-window packet counts.
 - Expiry uses a 512-slot, one-second worker-local timing wheel. Shared idle-source cleanup is bounded to four shards and 256 entries per shard per incremental sweep; active source records are retained.
@@ -27,7 +27,7 @@ Batch syscall failures may return `-1` with an error. The worker preserves that 
 
 ### Defaults and capacity boundaries
 
-| Setting | v2.4.9 default |
+| Setting | v2.5.0 default |
 |---|---|
 | Automatic rule worker budget | `min(GOMAXPROCS, 16)`; each listener endpoint still needs at least one worker |
 | Batch size | `64` messages |
@@ -45,13 +45,13 @@ Use a packet buffer appropriate to the application's largest datagram. Avoid inc
 
 The installer configures `net.core.rmem_max=16777216`, `net.core.wmem_max=16777216` and `net.core.netdev_max_backlog=65536`, as well as IPv4/IPv6 forwarding. Review the host's actual settings and other services before tuning.
 
-### Measuring the current build
+### Performance tuning
 
-Record the exact source revision, Go 1.27.1 build, kernel, NIC, MTU, traffic topology, flow count, batch size, worker count and CPU placement. Test 64/256/512/1400-byte datagrams, batches 32/64/128, and several worker counts.
+Throughput and latency depend on packet size, active flow count, batch size, worker count, CPU placement, kernel and NIC. Compare settings using the expected workload before changing production limits.
 
-Report received PPS, payload Gbps, per-core CPU, syscall counts, allocations/GC, kernel/application drops, RTT or explicitly defined one-way latency, p95/p99 latency and scaling efficiency. Separate loopback/namespace results from physical-NIC results and low-load latency from overload latency. Do not present historical benchmarks as current-build production capacity.
+Monitor received PPS, payload throughput, per-core CPU, allocations/GC, kernel/application drops and tail latency. Loopback and physical-NIC measurements are not interchangeable; overload latency should be considered separately from low-load latency.
 
-The Web control plane polls serially every 500 ms and reads snapshots; it does not perform per-packet work. Current documentation makes no measured line-rate or zero-loss capacity promise.
+The Web control plane polls serially every 500 ms and reads snapshots; it does not perform per-packet work. It does not guarantee line-rate throughput or zero loss.
 
 ### Advanced options
 
@@ -59,13 +59,13 @@ UDP GRO/GSO is not enabled by default. It needs ancillary-data handling, segment
 
 Check NIC RX/TX queues, RSS distribution, IRQ/CPU/NUMA placement and socket/softnet/NIC drop counters first. RPS/XPS and CPU affinity need workload-specific validation; the program does not pin every worker with `LockOSThread` by default.
 
-nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.4.9.
+nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.5.0.
 
 ## 简体中文
 
 ### 范围与转发路径
 
-强制 `GO` 规则、跨地址族以及通配回环 fallback 使用 Go 代理；同族且选择“nftables 优先”的规则使用 DNAT/SNAT 和符合条件的 flowtable 加速。Go 连接/会话/速率/内存限额及 Web 代理计数不覆盖内核转发，后者应通过 nftables、conntrack 和防火墙管理。
+强制 `GO` 规则、跨地址族以及通配回环 fallback 使用 Go 代理；同族且选择“nftables 优先”的规则使用 DNAT/SNAT 和符合条件的 flowtable 加速。Go 连接/会话/速率/内存限额不覆盖内核转发；Web 分别显示 Go 与内核尽力统计，详见[统计说明](MONITORING.zh-CN.md)。
 
 - 每个 worker 拥有监听 socket、packet slab、batch message、会话表、epoll、时间轮和统计。一个 worker goroutine 同时处理入口及 connected 上游 socket，不按会话或数据报创建 goroutine。
 - IPv4/IPv6 socket 独立，同族和跨族沿用同一会话模型。
@@ -81,7 +81,7 @@ nftables/flowtable integrates naturally with same-family NAT. Go batch forwardin
 
 批量系统调用失败可能返回 `-1` 和错误；worker 将其保留为零完成量及原错误，不再误判成非法计数。发送时的 EAGAIN/EWOULDBLOCK、ENOBUFS、ENOMEM、EINTR 不销毁仍有效的会话，未发送包计入丢弃；非法计数和致命描述符错误仍然拒绝。这不保证过载零丢包，也不新增缓冲或重试队列。
 
-| 设置 | v2.4.9 默认值 |
+| 设置 | v2.5.0 默认值 |
 |---|---|
 | 自动整规则 worker 预算 | `min(GOMAXPROCS, 16)`，每个监听端点仍至少需要 1 个 worker |
 | Batch 大小 | `64` |
@@ -99,13 +99,13 @@ worker 预算在整条规则的监听端点间分摊；端点数超过预算时�
 
 安装器设置 `net.core.rmem_max=16777216`、`net.core.wmem_max=16777216`、`net.core.netdev_max_backlog=65536` 以及 IPv4/IPv6 forwarding。调整前应核对主机实际设置与其他服务。
 
-### 当前构建的测试方法
+### 性能调优
 
-记录源码 revision、Go 1.27.1、内核、NIC、MTU、拓扑、flow 数、batch、worker 数和绑核情况。至少测试 64/256/512/1400 字节报文、32/64/128 batch 和多个 worker 数。
+吞吐与延迟取决于报文大小、活跃 flow 数、batch、worker 数、CPU 分布、内核及网卡。修改生产限制前，应使用预期业务负载比较不同设置。
 
-报告接收 PPS、有效载荷 Gbps、各核心 CPU、syscall、分配/GC、内核及应用丢包、定义清楚的 RTT/单向延迟、p95/p99 和扩展效率。区分 loopback/namespace 与物理 NIC，区分低负载和过载延迟；历史压测不应表述成当前构建的生产容量。
+关注接收 PPS、有效载荷吞吐、各核心 CPU、分配/GC、内核及应用丢包和尾部延迟。回环与物理网卡测量不能互相替代；过载与低负载延迟应分别考虑。
 
-Web 每 500 ms 串行轮询并读取快照，不参与逐包工作；当前文档不承诺已测线速或无丢包容量。
+Web 每 500 ms 串行轮询并读取快照，不参与逐包工作；不保证线速吞吐或零丢包。
 
 ### 高阶选项
 
@@ -113,4 +113,4 @@ Web 每 500 ms 串行轮询并读取快照，不参与逐包工作；当前文�
 
 先检查 NIC 队列、RSS、IRQ/CPU/NUMA 分布及 socket/softnet/NIC 丢包；RPS/XPS 和绑核需要业务验证。程序默认不以 `LockOSThread` 固定每个 worker。
 
-nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.4.9 已启用的数据面。
+nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.5.0 已启用的数据面。

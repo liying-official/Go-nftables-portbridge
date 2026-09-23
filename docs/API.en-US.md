@@ -1,15 +1,15 @@
-# Go-nftables-portbridge API Reference
+# Go-nftables-portbridge API Reference — v2.5.0
 
-**Applies to: v2.4.9**  
+**Applies to: v2.5.0**
+
 **Language:** **English** | [简体中文](API.zh-CN.md)  
-**Last statically reviewed: 2026-09-20 · Project toolchain: Go 1.27.1**
 
 > [!IMPORTANT]
 > Every management API requires an administrator Bearer token. Write operations also require `X-PortBridge-CSRF`. Normal installations should use HTTPS. Do not treat an HTTP success status by itself as proof that the data plane is active or that an old forwarding path has been fully retired.
 
-This document describes the Web management HTTP API. It does not describe internal Go package APIs or the TCP/UDP protocol carried by forwarded application traffic. Field names, enum values, and error semantics follow the v2.4.9 implementation.
+This document describes the Web management HTTP API. It does not describe internal Go package APIs or the TCP/UDP protocol carried by forwarded application traffic. Field names, enum values, and error semantics follow the v2.5.0 implementation.
 
-Source baseline: v2.4.9 (`d8131555460075dd29bbb10b5dc282f23dbed438`). Examples contain documentation placeholders, not live credentials or deployment details.
+Examples contain documentation placeholders, not live credentials or deployment details.
 
 ## Table of Contents
 
@@ -29,14 +29,14 @@ Source baseline: v2.4.9 (`d8131555460075dd29bbb10b5dc282f23dbed438`). Examples c
 - [14. Python Standard-Library Client Example](#14-python-standard-library-client-example)
 - [15. Concurrency, Retries, and Operational Boundaries](#15-concurrency-retries-and-operational-boundaries)
 - [16. Capabilities Not Exposed by the Current API](#16-capabilities-not-exposed-by-the-current-api)
+- [17. Prometheus metrics](#17-prometheus-metrics)
 - [Implementation References and Source Links](#implementation-references-and-source-links)
-- [Documentation Verification](#documentation-verification)
 
 ---
 
 ## 1. API Scope and Quick Reference
 
-The current release explicitly registers **8 management API routes**, all under `/api/`, with no `/api/v1/` version prefix. The management API and WebGUI share the same listeners, port, TLS configuration, and IP ACL.[^routes]
+The current release explicitly registers **8 JSON management API routes** under `/api/`, plus the protected Prometheus `GET /metrics` endpoint, with no `/api/v1/` version prefix. The management API and WebGUI share the same listeners, port, TLS configuration, and IP ACL.[^routes]
 
 | Method | Path | Purpose | Success | CSRF | Request JSON |
 |---|---|---|---:|---|---|
@@ -603,7 +603,7 @@ These budgets apply to the Go path and do not automatically constrain kernel nft
 
 Datagrams larger than `udp_packet_buffer_size` that are truncated are dropped and counted as application drops; truncated payload is not forwarded. Socket buffer values are requests, not guaranteed kernel-granted sizes. The status API does not expose effective socket buffer sizes or memory-budget consumption.[^udp-implementation][^udp-doc]
 
-v2.4.9 preserves valid UDP sessions under transient send pressure, but unsent packets are still counted as drops; these parameters do not guarantee zero loss under overload and do not create an unbounded retry queue.[^udp-doc]
+v2.5.0 preserves valid UDP sessions under transient send pressure, but unsent packets are still counted as drops; these parameters do not guarantee zero loss under overload and do not create an unbounded retry queue.[^udp-doc]
 
 ### 10.4 Port ranges
 
@@ -691,6 +691,7 @@ Each element of `/api/status.rules[]` has this structure:[^manager-runtime]
 |---|---|---|
 | `rule` | Rule | Rule object associated with the runtime record; it may not be a normal persistent-config rule |
 | `stats` | StatsSnapshot | Running flag, errors, and Go-path statistics |
+| `traffic` | TrafficSnapshot | Background-sampled Go/nft observations, hook counters, per-rule rates and validity flags; see [monitoring](MONITORING.en-US.md) |
 | `data_plane` | string | Data-plane label from the runtime/risk perspective; distinct from `rule.data_plane` |
 | `go_running` | boolean | Whether at least one registered Go runner exists for the logical rule; not proof that every derived ingress path is healthy |
 | `kernel_state` | string | Manager classification of kernel-state evidence; see below |
@@ -748,6 +749,8 @@ These values are not a complete traffic ledger for the instance. A pure nftables
 
 When a rule ID is retained, stop/start cycles generally retain cumulative counters. After a rule is fully deleted/cleaned up or the process restarts, counter continuity should not be expected. There is no counter-reset endpoint and no persistent historical time series.[^manager][^stats]
 
+`traffic.go` adds active TCP observations; `stats.bytes_up/bytes_down` retain their copy-completion semantics above. nft uses best-effort conntrack accounting, with hook counters reported separately. An unavailable or warming-up rate is not zero traffic. See [traffic and Prometheus](MONITORING.en-US.md).
+
 ### 11.4 Risk semantics of `running=true`
 
 When the runtime environment cannot prove that the old kernel path is empty, saving a disabled rule can produce a **risk-state response fragment** like the following:
@@ -780,7 +783,7 @@ The handlers use a one-field standard error object:[^json]
 }
 ```
 
-There is no `code`, `message`, `details`, `errors[]`, or `request_id`. In v2.4.9, fixed authentication/CSRF/JSON handler errors can still be Chinese while configuration-validation errors are English; the English GUI translates them through the frontend `translateAPIError` logic. **API error text is not guaranteed to be entirely English and there is no Accept-Language negotiation.**[^auth][^json][^gui]
+There is no `code`, `message`, `details`, `errors[]`, or `request_id`. In v2.5.0, fixed authentication/CSRF/JSON handler errors can still be Chinese while configuration-validation errors are English. The bilingual GUI translates known messages when English is selected; its language switch does not change the API protocol. **API error text is not guaranteed to be entirely English and there is no Accept-Language negotiation.**[^auth][^json][^gui]
 
 ### 12.2 Common status codes
 
@@ -797,7 +800,7 @@ There is no `code`, `message`, `details`, `errors[]`, or `request_id`. In v2.4.9
 | `429` | Too many failed authentications | APIError; no Retry-After contract |
 | `500` | Token/ID generation or rotation error, ACL refresh failure, etc. | APIError; may contain local error context |
 
-Go ServeMux GET routes also match HEAD. The root GET registration is also a fallback match, so some `Allow` headers can include `GET, HEAD`; this does not mean the resource implements a useful GET API. In v2.4.9, `OPTIONS /api/settings` returns `405` with `Allow: GET, HEAD, PUT`; do not interpret that as CORS support.[^routes]
+Go ServeMux GET routes also match HEAD. The root GET registration is also a fallback match, so some `Allow` headers can include `GET, HEAD`; this does not mean the resource implements a useful GET API. In v2.5.0, `OPTIONS /api/settings` returns `405` with `Allow: GET, HEAD, PUT`; do not interpret that as CORS support.[^routes]
 
 ### 12.3 Representative source error text
 
@@ -1005,7 +1008,7 @@ The CLI entry point only reads bootstrap and status; it does not create, update,
 
 ```python
 #!/usr/bin/env python3
-"""Go-nftables-portbridge v2.4.9 client; CLI performs read-only calls."""
+"""Go-nftables-portbridge v2.5.0 client; CLI performs read-only calls."""
 from __future__ import annotations
 
 import argparse
@@ -1255,7 +1258,7 @@ The table below prevents clients from inventing endpoints based on common REST n
 | Remote restart/stop, certificate hot reload | Not implemented; local operational action |
 | Certificate/private-key upload, ACME issuance | Not implemented; settings accept server-local file paths only |
 | Log query/download, SSE, WebSocket, event subscription | Not implemented |
-| `/metrics`, Prometheus output, workload `/healthz` | Not registered in this route table; status is also not an independent anonymous health endpoint |
+| Anonymous workload `/healthz` | Not implemented; status and `/metrics` both require administrator authentication |
 | Statistics history, counter reset, paging/filtering | Not implemented |
 | Software-version query, dynamic OpenAPI/Swagger | Not registered; `/api/bootstrap.name` is not a version number |
 | Read/change global resource limits, conntrack mark, flowtable master switch | Not exposed through API; configured in local full configuration |
@@ -1268,7 +1271,7 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 
 | Local field | Source default/range | API visibility |
 |---|---|---|
-| `version` | Config schema version `2`, not software release 2.4.9 | Not returned by GET config |
+| `version` | Config schema version `2`, not software release 2.5.0 | Not returned by GET config |
 | `web.admin_token_sha256` | SHA-256 of administrator token string | Not returned; cannot be set through settings |
 | `web.require_https` | Installation flow sets true; raw Default is false | Read only through `https.required`; settings does not accept it |
 | `web.allow_unsafe_all_address_acl` | Default false | Not returned/not API-modifiable; strict mode still rejects `/0` |
@@ -1280,9 +1283,13 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 
 ---
 
+## 17. Prometheus metrics
+
+`GET /metrics` shares management HTTPS, source-IP allowlisting and Bearer authentication; GET needs no CSRF. Success returns `text/plain; version=0.0.4; charset=utf-8`, not JSON. Metrics omit rule names, forwarding endpoints and tokens. Unavailable rate samples are omitted and accompanied by validity gauges. Configuration, fields and best-effort flowtable boundaries are described in [monitoring](MONITORING.en-US.md).
+
 ## Implementation References and Source Links
 
-The links below assume this file is stored in the repository `docs/` directory and point to the v2.4.9 implementation. References use file-level links to avoid stale line ranges. Source footnotes distinguish implemented server behavior from client recommendations explicitly identified as such in this document.
+The links below assume this file is stored in the repository `docs/` directory and point to the v2.5.0 implementation. References use file-level links to avoid stale line ranges. Source footnotes distinguish implemented server behavior from client recommendations explicitly identified as such in this document.
 
 [^routes]: [`internal/web/server.go`](../internal/web/server.go). Complete route registration, root page, and static-resource fallback.
 [^web-start]: [`internal/web/server.go`](../internal/web/server.go). Listener addresses, native TLS, HTTP timeouts, and Header limits.
@@ -1317,13 +1324,7 @@ The links below assume this file is stored in the repository `docs/` directory a
 [^udp-implementation]: [`internal/proxy/udp.go`](../internal/proxy/udp.go). Automatic workers, UDP packet filtering/drop/send counters, and maintenance aggregation.
 [^budgets]: [`internal/proxy/budget.go`](../internal/proxy/budget.go). Shared source budgets across runners/workers/ports/address families and UDP token buckets.
 [^udp-doc]: [`docs/udp-dataplane.md`](udp-dataplane.md) sections Scope and Defaults and capacity boundaries; [`README.md`](../README.md). Go/kernel counter and budget boundaries, defaults, and batch-send error semantics.
-[^gui]: [`internal/web/static/app.js`](../internal/web/static/app.js). API client wrapper, bootstrap, 500 ms serialized status polling, complete settings/Rule submission, frontend error translation, and local logout.
+[^gui]: [`internal/web/static/app.js`](../internal/web/static/app.js) and [`i18n.js`](../internal/web/static/i18n.js). API client wrapper, bootstrap, 500 ms serialized status polling, complete settings/Rule submission, language selection, known-error translation, and local logout.
 [^cli]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go). Default config/token paths and related startup flags.
 [^deployment]: [`README.md`](../README.md), [`packaging/portbridge.service`](../packaging/portbridge.service). Installed native-HTTPS enforcement, certificate trust, and loopback recovery guidance.
 [^main-refresh]: [`cmd/portbridge/main.go`](../cmd/portbridge/main.go). Initialization, 30-second Store snapshot refresh of ACL/rules, and shutdown signals.
-
-## Documentation Verification
-
-This reference was statically reviewed against the v2.4.9 source. Checks covered route registration, request/response fields, defaults, validation, authentication, Markdown links, JSON parsing, Bash/Python example syntax and offline client boundary tests. This documentation review did not start a service, execute the curl write examples against a server, or rerun Go integration tests.
-
-This verification establishes **documentation/API consistency**. It is not a complete nftables/conntrack data-plane certification and does not guarantee throughput, zero loss, host hardening, or behavior in arbitrary firewall environments.

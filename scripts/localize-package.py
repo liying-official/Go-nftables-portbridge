@@ -14,25 +14,14 @@ def localize(root, language):
             saved.parent.mkdir(parents=True,exist_ok=True)
             saved.write_bytes((root/name).read_bytes())
         (root/name).write_bytes(saved.read_bytes())
-    for name in ('v2.4.5-candidate.md','v2.4.6-candidate.md','v2.4.6-fix-candidate.md','v2.4.7-candidate.md','v2.4.8-candidate.md'):
-        (root/'docs'/name).unlink(missing_ok=True)
-    for name in ('index.html','app.js'):
-        (root/'internal/web/static'/name).write_bytes((root/'packaging/web-zh-CN'/name).read_bytes())
-    if language=='en-US':
-        mapping=json.loads((root/'packaging/web-en.json').read_text(encoding='utf-8'))
-        pattern=re.compile('|'.join(re.escape(x) for x in sorted(mapping,key=len,reverse=True)))
-        for name in ('index.html','app.js'):
-            path=root/'internal/web/static'/name
-            text=path.read_text(encoding='utf-8')
-            text=pattern.sub(lambda m:mapping[m.group()],text)
-            if name=='index.html':text=text.replace('lang="zh-CN"','lang="en-US"')
-            if re.search('[\u4e00-\u9fff]',text):
-                raise ValueError('Untranslated GUI text: '+name)
-            if name=='app.js':
-                errors=json.loads((root/'packaging/api-en.json').read_text(encoding='utf-8'))
-                text=text.replace('j.error||','translateAPIError(j.error)||')
-                text+='\nfunction translateAPIError(message){if(typeof message!=="string")return message;for(const [original,translated] of Object.entries('+json.dumps(errors,ensure_ascii=True)+'))message=message.replaceAll(original,translated);return message}\n'
-            path.write_text(text,encoding='utf-8',newline='\n')
+    # Both packages contain the same bilingual application. Only its initial
+    # language follows the installer/documentation language; the UI can switch.
+    index=root/'internal/web/static/index.html'
+    text=index.read_text(encoding='utf-8')
+    text,count=re.subn(r'<html lang="(?:en-US|zh-CN)" data-default-language="(?:en-US|zh-CN)">',
+                      f'<html lang="{language}" data-default-language="{language}">',text,count=1)
+    if count!=1:raise ValueError('Missing bilingual GUI language marker')
+    index.write_text(text,encoding='utf-8',newline='\n')
     for name in ('package-release.sh','verify-candidate.sh','test-clean-go-netns.sh','test-recovery-proc-subset.sh','test-recovery-boot-bind.sh'):
         saved=root/'packaging/script-sources'/name
         if not saved.exists():
@@ -63,7 +52,8 @@ def localize(root, language):
         title=en.splitlines()[0]
         if ' / ' in title:
             left,right=title.split(' / ',1)
-            title=left if language=='en-US' else '# Go-nftables-portbridge v2.4.9 — '+right
+            version=(root/'VERSION').read_text(encoding='ascii').strip()
+            title=left if language=='en-US' else '# Go-nftables-portbridge v'+version+' — '+right
         if language=='en-US':
             text=title+'\n'+en[en.index('\n'):]
         else:

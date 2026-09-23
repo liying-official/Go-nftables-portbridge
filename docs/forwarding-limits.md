@@ -1,4 +1,4 @@
-# v2.4.9 forwarding limits / 转发限制
+# v2.5.0 forwarding limits / 转发限制
 
 ## English
 
@@ -10,7 +10,7 @@ Grants are scoped to rule identity and original connection tuples, not a whole f
 
 Exact connection retirement requires protected same-identity ownership records. Missing ownership never authorizes deletion by a shared mark. Deleting a table does not prove old connections stopped. Startup can withhold forwarding during kernel inventory changes: verify rule health and real traffic, not only systemd ActiveState.
 
-Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent packets as drops while retaining valid sessions; there is no unbounded retry queue. Capacity, latency and hardware offload depend on deployment. Published v2.4.9 source archives have Ed25519 detached signatures. They contain no prebuilt binaries; local builds are not automatically publisher-signed.
+Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent packets as drops while retaining valid sessions; there is no unbounded retry queue. Capacity, latency and hardware offload depend on deployment. Release archives and SBOM are authenticated by signed SHA256SUMS. Each prebuilt package has a signed internal manifest; local rebuilds are not automatically publisher-signed.
 
 ## 简体中文
 
@@ -22,4 +22,4 @@ Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent 
 
 精确撤销依赖受保护的同身份归属记录。归属缺失不允许按共享 mark 删除连接；删表不等于旧连接停止。启动时库存变化可能暂时阻止转发，应检查规则健康及实际流量，而不只看 systemd ActiveState。
 
-Go UDP 使用有界会话和缓冲。暂时发送压力下，未发送包计入丢弃而保留有效会话，不使用无界重试队列。容量、延迟及硬件卸载取决于部署环境。v2.4.9 发布源码归档已有 Ed25519 分离签名，包内不含预编译二进制；本地构建产物不会自动获得发布者签名。
+Go UDP 使用有界会话和缓冲。暂时发送压力下，未发送包计入丢弃而保留有效会话，不使用无界重试队列。容量、延迟及硬件卸载取决于部署环境。Release 归档及 SBOM 通过已签名 SHA256SUMS 认证，每个预编译包包含内部签名清单；本地重新构建产物不会自动获得发布者签名。

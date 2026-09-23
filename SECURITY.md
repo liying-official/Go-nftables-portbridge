@@ -1,8 +1,8 @@
-# Go-nftables-portbridge v2.4.9 — Security policy / 安全说明
+# Go-nftables-portbridge v2.5.0 — Security policy / 安全说明
 
 ## Supported release
 
-v2.4.9 adds bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule\'s flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Service/reboot evidence is environment-specific and documented separately; broader policies and long-run capacity still require their own validation.
+v2.5.0 supports bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule's flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Validate firewall compatibility and capacity for the intended deployment.
 
 ## Reporting a vulnerability
 
@@ -17,6 +17,8 @@ Do not open a public issue for a suspected vulnerability. Use GitHub private vul
 Never include administrator tokens, SSH credentials, production configuration, TLS private keys, environment files, or unredacted packet captures.
 
 ## Management-plane boundary
+
+The bilingual Tabler UI serves its Core CSS/JS and selected Icons locally. The CSP keeps `script-src 'self'` and `style-src 'self'`, without unsafe inline/eval or third-party CDN permissions. Language selection is a browser preference, not an API/security setting; only that preference uses localStorage, never the administrator token.
 
 Installation and upgrades require HTTPS, including on loopback. If no certificate is configured, a unique ten-year self-signed ECDSA P-256 certificate is generated before the service starts. The installer and systemd service enforce this policy, and the settings API rejects clearing TLS paths or enabling insecure HTTP. Automatic LAN discovery remains disabled by default. Self-signed certificates encrypt traffic but require fingerprint verification and explicit client trust; never equate them with automatically trusted certificates. Existing valid certificates are preserved and invalid supplied material fails preflight. See the bilingual README for certificate import and replacement.
 
@@ -35,11 +37,13 @@ The application has bounded header/body sizes, read/write timeouts, an accepted-
 
 The management ACL does not restrict forwarding rules. Each configured TCP/UDP listen endpoint has its own exposure and must be protected separately when it is not intended to be public.
 
+`GET /metrics` uses the same management ACL, HTTPS and administrator Bearer token. Scraper credentials grant full management access, not read-only access; protect the scraper and its token file. Metrics expose rule IDs/protocols but omit rule names and forwarding endpoints.
+
 ## Credentials, files, and logs
 
 The administrator token is 256 bits and grants full management access. The Web UI stores it only in per-tab `sessionStorage`; browser extensions, injected scripts, screen capture, and a compromised administrator workstation remain outside the trust boundary. Rotate the token after suspected exposure.
 
-The installer does not print the token unless `--show-token` is explicitly used. Read `/etc/portbridge/admin.token` locally when needed. Configuration and token files are atomically replaced with mode `0600`; protect backups and deployment output to the same standard. Concurrent rotations are serialized across both files and rollback, but process/power failure between the two writes can still interrupt a rotation. Startup reports a mismatch while continuing to authenticate against the configured hash. Stop the service, run `portbridge --reset-admin-token` as the service account with its actual configuration/token paths, then restart. The bilingual README contains the installed-service recovery commands; resetting files beside a running process does not refresh that process's credential.
+The release installer prints the token only with `--show-token`; the interactive one-click installer displays it after a successful installation. Read `/etc/portbridge/admin.token` locally when needed. Configuration and token files are atomically replaced with mode `0600`; protect backups and deployment output to the same standard. Concurrent rotations are serialized across both files and rollback, but process/power failure between the two writes can still interrupt a rotation. Startup reports a mismatch while continuing to authenticate against the configured hash. Stop the service, run `portbridge --reset-admin-token` as the service account with its actual configuration/token paths, then restart. Resetting files beside a running process does not refresh that process's credential.
 
 TLS private keys must be regular files, not symlinks, and must have an accepted owner and restrictive mode. The installer stores operator-supplied TLS material separately under `/etc/portbridge-tls` and uninstall intentionally retains it.
 
@@ -49,7 +53,7 @@ At `info` level, normal startup messages omit rule names and forwarding endpoint
 
 The service needs `CAP_NET_ADMIN` to manage only the `inet portbridge` table and `CAP_NET_BIND_SERVICE` for privileged ports. The table carries an instance-specific owner comment and all forwarding rules use a nonzero instance conntrack mark. PortBridge refuses to overwrite or remove a same-name table with a missing/mismatched marker. The supplied systemd unit removes other capabilities and applies filesystem, process, device, namespace, syscall, file-descriptor, task, CPU, and memory restrictions.
 
-nftables admission updates and conntrack retirement are separate operations. Exact tuple/mark/common-zone matching, a persistent owned unhooked journal and visible failure states replace the misleading delete-table-is-fail-closed claim. Unknown ownership is never guessed from a shared mark; old flows may remain when both records and process memory are lost. See the forwarding limits before cleanup or deployment.
+nftables admission updates and conntrack retirement are separate operations. Retirement uses exact tuple/mark/common-zone matching, a persistent owned unhooked journal and visible failure states. Deleting a table alone does not prove that existing connections stopped. Unknown ownership is never guessed from a shared mark; old flows may remain when both records and process memory are lost. See the forwarding limits before cleanup or deployment.
 
 ## Forwarding targets and resource exhaustion
 
@@ -57,27 +61,31 @@ Rule targets are untrusted input. Literal addresses and every DNS refresh result
 
 Global TCP connection, UDP session and estimated UDP-memory budgets apply to Go proxy paths together with per-rule and per-source limits. UDP source-session and token-bucket rate limits are shared across the rule's SO_REUSEPORT workers, port ranges, IPv4/IPv6 listeners, wildcard fallback and hybrid Go runners. They do not automatically constrain nftables/flowtable traffic; apply required kernel-path limits separately. Token buckets allow bounded bursts rather than fixed-window per-second guarantees. Monitor rejection/drop counters, socket drops, memory, file descriptors and conntrack use.
 
-The v2.4.9 Release provides source archives and SHA256SUMS with detached Ed25519 signatures, but no prebuilt binaries. Verify them before using the clean-source build path. Local compilation does not automatically sign its output; the separate prebuilt-bundle policy below is not the authentication format of these source archives.
+The v2.5.0 Release provides four prebuilt Linux packages for amd64/arm64 and English/Simplified Chinese, plus SBOM and signed SHA256SUMS. Verify the checksum signature before extracting a package. Local builds are not automatically publisher-signed.
 
 ## Release integrity
 
-For separately produced prebuilt bundles (not included in the current v2.4.9 source Release), installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and source/binary hashes. That prebuilt packaging format also signs its own manifests and checksums; it is distinct from the current source-archive detached signatures. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the private key is never shipped in the repository or archives.
+Prebuilt installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and source/binary hashes. The signed SHA256SUMS authenticates the four archives and SBOM; the signed internal manifest separately authenticates the installed package contents. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the private key is never shipped in the repository or archives.
 
 The signing identity is `portbridge-release-v2` and the namespace is `portbridge-release`. Verify the expected key/fingerprint from a trusted source before trusting bundled signer data. Keep private-key backups offline and separate from published files.
 
 ## 中文说明
 
-v2.4.9 新增逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除；服务与重启证据属于特定环境并单独记录；更广策略与长时间容量仍需独立验证。
+Tabler 双语界面的 Core CSS/JS 和所需 Icons 均在本机提供，CSP 保持 `script-src 'self'` 与 `style-src 'self'`，不开放不安全内联、eval 或第三方 CDN。语言切换仅是浏览器偏好，不修改 API 或安全设置；localStorage 只保存语言，不保存管理员令牌。
+
+v2.5.0 支持逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除。部署时仍应确认防火墙兼容性和容量是否满足需求。
 
 安装与升级后包括回环监听也强制 HTTPS；未配置证书时在启动前生成每台机器独立、有效期十年的 ECDSA P-256 自签证书。安装器与 systemd 双重执行要求，设置 API 拒绝清空证书或启用明文 HTTP。自签证书提供加密但需要核对指纹并建立客户端信任，不能等同于浏览器自动信任。已有有效证书保留，无效证书在预检时报错；导入和替换流程见双语 README。默认仍关闭自动 LAN 识别，远程可使用 SSH 隧道。公网直连必须同时使用云安全组/主机防火墙、原生 TLS 与严格 IP 白名单：先配置证书并重启确认 HTTPS，再从 HTTPS 关闭自动 LAN、加入当前直连地址并启用严格模式。严格模式忽略自动 LAN 和 `--bootstrap-allow`，拒绝 `/0`，只额外保留回环恢复通道；TLS 默认最低 1.2，公网直连可设置 `web.tls_min_version=1.3`（重启生效），私钥必须是非符号链接的常规文件，通常使用 `0600` 或 `0640 root:portbridge`。
 
 PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也使用 HTTPS 并验证证书/主机名，后端只监听回环/私网，并由代理和防火墙根据真实客户端执行 TLS、白名单、限流与抗 DoS；应用看到的直连来源只是代理。管理 ACL 只保护管理页面，不会限制每条转发规则的对外暴露。
 
-管理令牌为 256 位并拥有完整管理权限，Web 仅将其放在当前标签页的 `sessionStorage`。安装脚本默认不输出令牌；需要时在本机读取 `/etc/portbridge/admin.token`，怀疑泄露后立即轮换。debug/error 日志可能包含客户端、目标、域名与规则详情，分享前必须脱敏。
+`GET /metrics` 同样要求管理 ACL、HTTPS 和管理员 Bearer 认证。抓取凭据仍拥有完整管理权限，并非只读令牌，须保护抓取主机及凭据文件。指标暴露规则 ID/协议，但不输出规则名或转发端点。
 
-并发轮换会在令牌文件、配置和回滚期间完整串行化，但进程或电源在两次写入之间中断仍可能造成不一致。启动时会明确告警，并继续按配置哈希认证。恢复时先停止服务，再以服务账户和相同配置/令牌路径执行 `--reset-admin-token`，随后重新启动；完整命令见中文 README。对运行中进程单独重置磁盘文件不会刷新其内存凭据。
+管理令牌为 256 位并拥有完整管理权限，Web 仅将其放在当前标签页的 `sessionStorage`。发布包安装器仅在指定 `--show-token` 时输出令牌，一键安装脚本在成功后显示令牌；也可在本机读取 `/etc/portbridge/admin.token`，怀疑泄露后立即轮换。debug/error 日志可能包含客户端、目标、域名与规则详情，分享前必须脱敏。
 
-当前 v2.4.9 Release 的源码归档与 SHA256SUMS 附有 Ed25519 分离签名，不含预编译二进制；本地源码构建产物不会自动获得发布者签名。归档分离签名不替代预编译安装器的内部清单验签。验签步骤见 [README.zh-CN.md](README.zh-CN.md)。
+并发轮换会在令牌文件、配置和回滚期间完整串行化，但进程或电源在两次写入之间中断仍可能造成不一致。启动时会明确告警，并继续按配置哈希认证。恢复时先停止服务，再以服务账户和相同配置/令牌路径执行 `--reset-admin-token`，随后重新启动。对运行中进程单独重置磁盘文件不会刷新其内存凭据。
+
+v2.5.0 Release 提供 amd64/arm64 × 中英双语四个 Linux 预编译包、SBOM 和已签名 SHA256SUMS。解压前先验证校验清单签名；安装器另行验证包内签名清单。本地构建产物不会自动获得发布者签名。验签步骤见 [README.zh-CN.md](README.zh-CN.md)。
 
 签名身份为 `portbridge-release-v2`，namespace 为 `portbridge-release`。应先从可信来源核对预期公钥/指纹，再信任包内 signer；私钥备份应离线保存并与发布文件分离。
 

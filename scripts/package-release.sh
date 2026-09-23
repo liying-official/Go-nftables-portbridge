@@ -6,7 +6,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '\r\n' < "$ROOT_DIR/VERSION")"
 GO_BIN="${PORTBRIDGE_GO_BIN:-go}"
 RELEASE_TOOLCHAIN="${PORTBRIDGE_RELEASE_TOOLCHAIN:-go1.27.1}"
-RELEASE_DIR="${PORTBRIDGE_RELEASE_DIR:-$ROOT_DIR/release}"
+RELEASE_DIR="${PORTBRIDGE_RELEASE_DIR:-$ROOT_DIR/release/v$VERSION}"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}"
 SOURCE_REVISION_OVERRIDE="${PORTBRIDGE_SOURCE_REVISION:-}"
 SIGNING_KEY="${PORTBRIDGE_SIGNING_KEY:-}"
@@ -103,21 +103,23 @@ else
 fi
 
 install -d -m 0755 "$RELEASE_DIR"
-EN_NAME="Go-nftables-portbridge-v${VERSION}-en-US"
-ZH_NAME="Go-nftables-portbridge-v${VERSION}-zh-CN"
-EN_ARCHIVE="$RELEASE_DIR/${EN_NAME}.tar.gz"
-ZH_ARCHIVE="$RELEASE_DIR/${ZH_NAME}.tar.gz"
-CHECKSUMS="$RELEASE_DIR/Go-nftables-portbridge-v${VERSION}-SHA256SUMS.txt"
-MANIFEST="$RELEASE_DIR/release-manifest.json"
-MANIFEST_SIG="$MANIFEST.sig"
-CHECKSUMS_SIG="$CHECKSUMS.sig"
-rm -f -- "$EN_ARCHIVE" "$ZH_ARCHIVE" "$CHECKSUMS" "$CHECKSUMS_SIG" "$MANIFEST" "$MANIFEST_SIG"
+OUTPUTS=(SHA256SUMS SHA256SUMS.sig SBOM)
+for language in en-US zh-CN; do
+  for arch in amd64 arm64; do
+    OUTPUTS+=("portbridge-v${VERSION}-linux-${arch}-${language}.tar.gz")
+  done
+done
+for name in "${OUTPUTS[@]}"; do
+  if [[ -e "$RELEASE_DIR/$name" || -L "$RELEASE_DIR/$name" ]]; then
+    echo "Refusing to overwrite release output: $name" >&2
+    exit 1
+  fi
+done
 
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/portbridge-release.XXXXXX")"
 trap 'rm -rf -- "$STAGING"' EXIT
 COMMON="$STAGING/common"
 install -d -m 0755 "$COMMON/dist"
-
 for path in \
   .gitattributes .gitignore CONTRIBUTING.md LICENSE Makefile \
   README.md README.zh-CN.md RELEASE_NOTES.md RELEASE_NOTES.zh-CN.md \
@@ -125,114 +127,56 @@ for path in \
   config.public.example.json go.mod go.sum cmd docs internal packaging scripts vendor; do
   cp -a -- "$ROOT_DIR/$path" "$COMMON/"
 done
-
-LDFLAGS="-s -w -buildid= -X main.version=$VERSION"
-
+if [[ -n "$(find "$COMMON" ! -type f ! -type d -print -quit)" ]]; then
+  echo "Release sources must contain only regular files and directories" >&2
+  exit 1
+fi
 find "$COMMON" -type d -exec chmod 0755 {} +
 find "$COMMON" -type f -exec chmod 0644 {} +
 find "$COMMON/scripts" -type f -name '*.sh' -exec chmod 0755 {} +
+LDFLAGS="-s -w -buildid= -X main.version=$VERSION"
 
-cp -a -- "$COMMON" "$STAGING/$EN_NAME"
-cp -a -- "$COMMON" "$STAGING/$ZH_NAME"
-
-python3 "$ROOT_DIR/scripts/localize-package.py" "$STAGING/$EN_NAME" en-US
-python3 "$ROOT_DIR/scripts/localize-package.py" "$STAGING/$ZH_NAME" zh-CN
-for bundle in "$EN_NAME" "$ZH_NAME"; do
+for language in en-US zh-CN; do
+  LOCALIZED="$STAGING/localized-$language"
+  cp -a -- "$COMMON" "$LOCALIZED"
+  python3 "$ROOT_DIR/scripts/localize-package.py" "$LOCALIZED" "$language"
   for arch in amd64 arm64; do
-    (cd -- "$STAGING/$bundle"; CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" \
-      -o "dist/go-nftables-portbridge-linux-$arch" ./cmd/portbridge)
+    name="portbridge-v${VERSION}-linux-${arch}-${language}"
+    bundle="$STAGING/$name"
+    cp -a -- "$LOCALIZED" "$bundle"
+    binary="$bundle/dist/go-nftables-portbridge-linux-$arch"
+    (cd -- "$bundle"; CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" -o "$binary" ./cmd/portbridge)
+    "$GO_BIN" version -m "$binary" | grep -F "$ACTUAL_TOOLCHAIN"
+    if [[ "$arch" == "$($GO_BIN env GOHOSTARCH)" && "$($GO_BIN env GOHOSTOS)" == linux ]]; then
+      [[ "$("$binary" -version)" == "$VERSION" ]]
+    fi
+    (
+      cd -- "$bundle"
+      LC_ALL=C find . -type f ! -path './dist/*' \
+        ! -name 'source-tree.sha256' ! -name 'release-bundle-manifest.json' \
+        ! -name 'release-bundle-manifest.json.sig' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > source-tree.sha256
+    )
+    python3 "$ROOT_DIR/scripts/release-metadata.py" bundle "$bundle" "$VERSION" "$SOURCE_REVISION" "$ACTUAL_TOOLCHAIN" --arch "$arch" --language "$language"
+    ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$bundle/release-bundle-manifest.json"
+    ssh-keygen -Y verify -q -f "$SIGNER_FILE" -I "$SIGNER_IDENTITY" -n "$SIGNATURE_NAMESPACE" -s "$bundle/release-bundle-manifest.json.sig" < "$bundle/release-bundle-manifest.json"
+    find "$bundle" -type f -exec chmod 0644 {} +
+    find "$bundle/scripts" -type f -name '*.sh' -exec chmod 0755 {} +
+    chmod 0755 "$binary"
+    find "$bundle" -type f -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
+    find "$bundle" -type d -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
+    tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C "$STAGING" -cf - "$name" | gzip -n > "$RELEASE_DIR/$name.tar.gz"
   done
 done
-
-write_bundle_metadata() {
-  local bundle_root="$1"
-  local source_manifest="$bundle_root/source-tree.sha256"
-  local bundle_manifest="$bundle_root/release-bundle-manifest.json"
-  local AMD64_SHA ARM64_SHA
-  AMD64_SHA="$(sha256sum "$bundle_root/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)"
-  ARM64_SHA="$(sha256sum "$bundle_root/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)"
-  (
-    cd -- "$bundle_root"
-    LC_ALL=C find . -type f \
-      ! -path './dist/*' \
-      ! -name 'source-tree.sha256' \
-      ! -name 'release-bundle-manifest.json' \
-      ! -name 'release-bundle-manifest.json.sig' \
-      -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > source-tree.sha256
-  )
-  local source_manifest_sha
-  source_manifest_sha="$(sha256sum "$source_manifest" | cut -d ' ' -f1)"
-  printf '%s\n' \
-    '{' \
-    '  "project": "Go-nftables-portbridge",' \
-    "  \"version\": \"$VERSION\"," \
-    "  \"source_revision\": \"$SOURCE_REVISION\"," \
-    "  \"release_toolchain\": \"$ACTUAL_TOOLCHAIN\"," \
-    "  \"source_manifest_sha256\": \"$source_manifest_sha\"," \
-    '  "binaries": {' \
-    "    \"amd64\": \"$AMD64_SHA\"," \
-    "    \"arm64\": \"$ARM64_SHA\"" \
-    '  }' \
-    '}' > "$bundle_manifest"
-  ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$bundle_manifest"
-}
-
-write_bundle_metadata "$STAGING/$EN_NAME"
-write_bundle_metadata "$STAGING/$ZH_NAME"
-find "$STAGING/$EN_NAME" "$STAGING/$ZH_NAME" -type f -exec chmod 0644 {} +
-find "$STAGING/$EN_NAME/scripts" "$STAGING/$ZH_NAME/scripts" -type f -name '*.sh' -exec chmod 0755 {} +
-chmod 0755 "$STAGING/$EN_NAME/dist/"* "$STAGING/$ZH_NAME/dist/"*
-
-find "$STAGING/$EN_NAME" "$STAGING/$ZH_NAME" -type f -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
-find "$STAGING/$EN_NAME" "$STAGING/$ZH_NAME" -type d -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
-
-tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C "$STAGING" -cf - "$EN_NAME" | gzip -n > "$EN_ARCHIVE"
-tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C "$STAGING" -cf - "$ZH_NAME" | gzip -n > "$ZH_ARCHIVE"
-
-EN_SHA="$(sha256sum "$EN_ARCHIVE" | cut -d ' ' -f1)"
-ZH_SHA="$(sha256sum "$ZH_ARCHIVE" | cut -d ' ' -f1)"
-EN_SIZE="$(stat -c %s "$EN_ARCHIVE")"
-ZH_SIZE="$(stat -c %s "$ZH_ARCHIVE")"
-
-printf '%s\n' \
-  '{' \
-  '  "project": "Go-nftables-portbridge",' \
-  "  \"version\": \"$VERSION\"," \
-  "  \"source_revision\": \"$SOURCE_REVISION\"," \
-  "  \"source_date_epoch\": $SOURCE_DATE_EPOCH," \
-  "  \"release_toolchain\": \"$ACTUAL_TOOLCHAIN\"," \
-  '  "minimum_source_toolchain": "go1.27.1",' \
-  '  "binaries": [' \
-  "    {\"os\":\"linux\",\"arch\":\"amd64\",\"language\":\"en-US\",\"sha256\":\"$(sha256sum "$STAGING/$EN_NAME/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)\"}," \
-  "    {\"os\":\"linux\",\"arch\":\"arm64\",\"language\":\"en-US\",\"sha256\":\"$(sha256sum "$STAGING/$EN_NAME/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)\"}," \
-  "    {\"os\":\"linux\",\"arch\":\"amd64\",\"language\":\"zh-CN\",\"sha256\":\"$(sha256sum "$STAGING/$ZH_NAME/dist/go-nftables-portbridge-linux-amd64" | cut -d ' ' -f1)\"}," \
-  "    {\"os\":\"linux\",\"arch\":\"arm64\",\"language\":\"zh-CN\",\"sha256\":\"$(sha256sum "$STAGING/$ZH_NAME/dist/go-nftables-portbridge-linux-arm64" | cut -d ' ' -f1)\"}" \
-  '  ],' \
-  '  "archives": [' \
-  "    {\"file\":\"${EN_NAME}.tar.gz\",\"language\":\"en-US\",\"bytes\":$EN_SIZE,\"sha256\":\"$EN_SHA\"}," \
-  "    {\"file\":\"${ZH_NAME}.tar.gz\",\"language\":\"zh-CN\",\"bytes\":$ZH_SIZE,\"sha256\":\"$ZH_SHA\"}" \
-  '  ]' \
-  '}' > "$MANIFEST"
-ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$MANIFEST"
-
+python3 "$ROOT_DIR/scripts/release-metadata.py" sbom "$RELEASE_DIR" "$VERSION" "$SOURCE_REVISION" "$ACTUAL_TOOLCHAIN" --source "$ROOT_DIR" --epoch "$SOURCE_DATE_EPOCH"
 (
   cd -- "$RELEASE_DIR"
-  sha256sum "$(basename "$EN_ARCHIVE")" "$(basename "$ZH_ARCHIVE")" "$(basename "$MANIFEST")" "$(basename "$MANIFEST_SIG")" > "$(basename "$CHECKSUMS")"
+  sha256sum portbridge-v"$VERSION"-linux-{amd64,arm64}-{en-US,zh-CN}.tar.gz SBOM > SHA256SUMS
 )
-ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$CHECKSUMS"
-
-for bundle in "$EN_NAME" "$ZH_NAME"; do
-  "$STAGING/$bundle/dist/go-nftables-portbridge-linux-amd64" -version
-  "$GO_BIN" version -m "$STAGING/$bundle/dist/go-nftables-portbridge-linux-amd64" | grep -F "$ACTUAL_TOOLCHAIN"
-  "$GO_BIN" version -m "$STAGING/$bundle/dist/go-nftables-portbridge-linux-arm64" | grep -F "$ACTUAL_TOOLCHAIN"
-done
+ssh-keygen -Y sign -q -f "$SIGNING_KEY" -n "$SIGNATURE_NAMESPACE" "$RELEASE_DIR/SHA256SUMS"
 (
   cd -- "$RELEASE_DIR"
-  sha256sum -c "$(basename "$CHECKSUMS")"
-	ssh-keygen -Y verify -q -f "$SIGNER_FILE" -I "$SIGNER_IDENTITY" -n "$SIGNATURE_NAMESPACE" -s "$(basename "$MANIFEST_SIG")" < "$(basename "$MANIFEST")"
-	ssh-keygen -Y verify -q -f "$SIGNER_FILE" -I "$SIGNER_IDENTITY" -n "$SIGNATURE_NAMESPACE" -s "$(basename "$CHECKSUMS_SIG")" < "$(basename "$CHECKSUMS")"
+  sha256sum -c SHA256SUMS
+  ssh-keygen -Y verify -q -f "$SIGNER_FILE" -I "$SIGNER_IDENTITY" -n "$SIGNATURE_NAMESPACE" -s SHA256SUMS.sig < SHA256SUMS
 )
-
-chmod 0644 "$EN_ARCHIVE" "$ZH_ARCHIVE" "$CHECKSUMS" "$CHECKSUMS_SIG" "$MANIFEST" "$MANIFEST_SIG"
-
+for name in "${OUTPUTS[@]}"; do chmod 0644 "$RELEASE_DIR/$name"; done
 printf 'Release assets written to %s\n' "$RELEASE_DIR"

@@ -85,11 +85,15 @@ func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dia
 	active.Store(upstream, struct{}{})
 	defer active.Delete(upstream)
 	defer upstream.Close()
+	meter := r.stats.beginTCPMeter(client, upstream)
 	stopIdleMonitor := monitorTCPIdle(r.ctx, time.Duration(r.rule.TCPIdleTimeoutSeconds)*time.Second, client, upstream)
 	defer stopIdleMonitor()
 	uploadDone := make(chan int64, 1)
 	go func() {
 		n, copyErr := copyTCPStream(upstream, client)
+		if meter != nil {
+			meter.upDone.Store(n)
+		}
 		if copyErr != nil {
 			// A failed direction cannot complete by half-closing alone: wake
 			// the reverse copy so the existing deferred reservations return.
@@ -101,6 +105,9 @@ func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dia
 		uploadDone <- n
 	}()
 	down, copyErr := copyTCPStream(client, upstream)
+	if meter != nil {
+		meter.downDone.Store(down)
+	}
 	if copyErr != nil {
 		_ = upstream.Close()
 		_ = client.Close()
@@ -109,12 +116,15 @@ func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dia
 		closeWrite(client)
 	}
 	up := <-uploadDone
+	r.stats.mu.Lock()
+	delete(r.stats.liveTCP, meter)
 	if up > 0 {
 		r.stats.bytesUp.Add(uint64(up)) // #nosec G115 -- io.Copy byte counts are non-negative and checked above.
 	}
 	if down > 0 {
 		r.stats.bytesDown.Add(uint64(down)) // #nosec G115 -- io.Copy byte counts are non-negative and checked above.
 	}
+	r.stats.mu.Unlock()
 }
 
 func tcpSourceAddress(address net.Addr) (netip.Addr, bool) {
