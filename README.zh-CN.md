@@ -1,229 +1,92 @@
-# Go-nftables-portbridge — v2.5.0
+# PortBridge — v2.5.0
 
-[![Release](https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge)](https://github.com/liying-official/Go-nftables-portbridge/releases/latest)
+**面向 Linux 的 TCP / UDP 端口转发工具，提供中英双语 Web 管理界面和需要认证的 HTTP API。**
+
+[![Release](https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge)](https://github.com/liying-official/Go-nftables-portbridge/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational)
-![Architecture: amd64 / arm64](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational)
+![Linux](https://img.shields.io/badge/platform-Linux-informational)
+![amd64 / arm64](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational)
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | **简体中文**
 
-**面向 Linux 的 TCP/UDP 端口转发工具，通过易用的 WebGUI 或 HTTP API 管理。**
+PortBridge 将适用于符合条件流量的 nftables DNAT/SNAT、可选的 **software flowtable 软件加速**，与支持跨地址族转发的 Go TCP/UDP 代理结合。通过浏览器即可管理规则、查看运行状态和轮换管理员令牌。
 
-PortBridge 将 nftables/flowtable 加速与 Go 代理结合：符合条件的同地址族流量使用内核转发，IPv4 ↔ IPv6 跨地址族流量使用 Go 代理。支持按规则选择数据面、热更新规则，并在浏览器中查看实际运行状态。
+[安装指南](docs/INSTALL.zh-CN.md) · [API 文档](docs/API.zh-CN.md) · [完整文档](docs/INDEX.md) · [发布版本](https://github.com/liying-official/Go-nftables-portbridge/releases)
 
-[下载发布版](https://github.com/liying-official/Go-nftables-portbridge/releases/latest) · [中文 API 文档](docs/API.zh-CN.md) · [转发边界](docs/forwarding-limits.md) · [反馈问题](https://github.com/liying-official/Go-nftables-portbridge/issues)
+本文档适用于 **v2.5.0**。动态版本徽章和交互式安装器可能指向其他已发布版本；部署时应使用与所选发布包匹配的文档。
 
 ## 主要功能
 
-| 能力 | 说明 |
+| 功能 | v2.5.0 提供的能力 |
 |---|---|
-| WebGUI 与 API | 创建、编辑、启停和删除规则，管理设置，查看运行状态，轮换管理员令牌；详见[中文 API 文档](docs/API.zh-CN.md)。 |
-| Tabler 双语界面 | 同一界面切换简体中文 / English，采用天蓝色卡片、响应式规则表和移动端导航；Tabler Core 与 Icons 均由本机提供。 |
-| TCP / UDP | 支持 TCP、UDP 或两者同时转发；支持单端口及最多 4096 个端口的等长端口段映射。 |
-| IPv4 与 IPv6 | 支持 IPv4 → IPv4、IPv6 → IPv6、IPv4 → IPv6、IPv6 → IPv4。 |
-| 双数据面 | 优先使用 nftables DNAT/SNAT 和可选 flowtable 加速，也可显式选择 Go TCP/UDP 代理。 |
-| DNS 与监控 | 自定义 DNS、30 秒域名刷新、每规则实时速率、Go 统计及 nft/flowtable 尽力采集；支持 [Prometheus `/metrics`](docs/MONITORING.zh-CN.md)。 |
-| 安全安装 | 提供中英双语 amd64/arm64 签名预编译包，无需 Go 编译器；使用 HTTPS 管理和独立 systemd 服务账户。 |
+| 端口转发 | TCP、UDP 或两者同时；单端口及最多 4096 个端口的等长端口段映射。 |
+| 地址族 | IPv4 → IPv4、IPv6 → IPv6、IPv4 → IPv6、IPv6 → IPv4。 |
+| 数据面选择 | 在符合条件时优先使用 nftables，或明确选择 Go 代理；通配监听可能形成混合路径。 |
+| 管理界面 | English / 简体中文 Tabler 界面、规则编辑、设置与 Bearer 认证 API；写操作另需 CSRF 校验，界面资源由本机提供。详见[中文 API 文档](docs/API.zh-CN.md)。 |
+| 可观测性 | 运行状态、Go 载荷计数、独立的 nft/conntrack 尽力采样，以及需要认证的 Prometheus 指标。 |
+| 部署 | 发布包验签安装、原生 HTTPS、独立账户与加固的 systemd 服务；发布打包目标为 Linux amd64 / arm64。 |
 
-登录页、管理页和规则弹窗均提供语言菜单。两种语言发布包包含相同的双语 WebUI，包语言决定初始界面语言、安装提示和文档语言。浏览器只在 localStorage 中记忆语言偏好，管理员令牌仍仅保存在 sessionStorage 中。
-
-**注意边界：**管理白名单不保护转发端口，Go 代理资源预算不会自动作用于 nftables 路径。界面将 Go 有效载荷与 nft L3 累计值合并为近似展示值，实时速率及 API/Prometheus 来源仍分开，flowtable 采样可能延迟或遗漏短连接。Flowtable 是否可用取决于内核及周边防火墙，不能假设不满足条件的规则都会自动回退到 Go。与其他防火墙/NAT 软件共存前，请阅读[转发边界](docs/forwarding-limits.md)。
+两种语言的发布包都包含同一个双语界面，包语言决定初始显示语言。浏览器用 `localStorage` 保存语言偏好，管理员令牌只放在当前标签页的 `sessionStorage`。
 
 ## 快速开始
 
-如需交互式首次安装，请参阅[一键安装脚本](docs/ONECLICK.zh-CN.md)：自动选择最新稳定版，交互选择语言和持久严格 IP 白名单，并在本机网卡地址开放管理监听。这与下方默认仅回环访问的手动流程不同；已有实例不会被自动覆盖。
+先选择符合管理方式的安装流程：
 
-一键脚本跟随 GitHub 最新已发布稳定版，不以本地检出或本文档版本为准。下方固定版本的命令要求 v2.5.0 发布附件已经上线；若附件不可用，请停止并使用与可下载版本匹配的文档，不要用源码归档代替预编译包。
-
-请在交互式 **root Bash 终端**执行（非 root 用户先运行 `sudo -i`）：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/main/scripts/install-oneclick.sh)
-```
-
-此命令下载并执行当前 `main` 分支脚本，仅在信任本仓库时使用；如有需要，请先下载审阅。下载报错或未出现安装提示不代表安装成功。
-
-### 1. 准备服务器
-
-使用运行 **systemd 的 Linux 主机**，CPU 为 **amd64 或 arm64**，并具备 root/sudo 权限。主机必须允许修改 nftables 和网络 sysctl；受限容器不能替代满足这些要求的主机。需要 Bash、tar/gzip、`sha256sum`、`awk`、标准 GNU/账户工具及 `runuser`。
-
-Debian/Ubuntu 可先一次性安装附加依赖。root 用户省略 `sudo`：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends ca-certificates curl openssh-client nftables conntrack iproute2
-```
-
-其他发行版请使用自己的包管理器准备同等依赖。非 APT 系统请提前安装全部依赖，因为安装器在缺少 nftables 或 conntrack 时会调用 `apt-get`。
-
-### 2. 下载、验证并安装
-
-以下代码安装 **v2.5.0 中文预编译发布包**，自动选择 CPU 架构。在服务器上完整复制执行即可，兼容 root 和 sudo 用户，**无需安装 Go**。已有实例请先阅读[升级与卸载](#升级与卸载)。
-
-```bash
-bash <<'BASH'
-set +x
-set -euo pipefail
-umask 077
-case "$(uname -m)" in
-  x86_64) ARCH=amd64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
-  *) echo '不支持的 CPU 架构' >&2; exit 1 ;;
-esac
-NAME="portbridge-v2.5.0-linux-${ARCH}-zh-CN"
-BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.0'
-WORK=$(mktemp -d)
-cd "$WORK"
-for FILE in "$NAME.tar.gz" SHA256SUMS SHA256SUMS.sig; do
-  curl -q -fL --proto '=https' --proto-redir '=https' \
-    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.0"
-done
-printf '%s\n' 'portbridge-release-v2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVc6m1afFOM3gsLO6VXuLyAlHbkvBP83wlMEqArW/0k' > release-signers
-ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 \
-  -n portbridge-release -s SHA256SUMS.sig < SHA256SUMS
-awk -v file="$NAME.tar.gz" '$2 == file { print; n++ } END { if (n != 1) exit 1 }' \
-  SHA256SUMS > selected-SHA256SUMS
-sha256sum -c selected-SHA256SUMS
-mkdir package
-tar -xzf "$NAME.tar.gz" --strip-components=1 -C package
-cd package
-test -x "dist/go-nftables-portbridge-linux-$ARCH"
-if (( EUID == 0 )); then ./scripts/install.sh; else sudo ./scripts/install.sh; fi
-test "$(/usr/local/bin/portbridge -version)" = '2.5.0'
-systemctl is-active --quiet portbridge
-test "$(systemctl show portbridge -p SubState --value)" = running
-systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
-printf '已安装；发布包解压目录：%s\n' "$PWD"
-BASH
-```
-
-流程会在**解压或执行归档前**验证校验和清单的签名，核对当前发布包摘要，再调用包内安装器。安装器继续检查固定发布公钥、内部清单、源码/脚本摘要、二进制摘要和版本。任一步失败都会停止，请勿绕过校验。
-
-末尾命令要求版本为 `2.5.0`、服务为 `active/running`，并输出结果、进程 ID 和重启次数。安装器会创建服务账户、配置 HTTPS、安装并启用 systemd 服务、设置转发 sysctl，然后启动 PortBridge。全新安装**不包含任何转发规则**。
-
-#### 发布包与签名信任说明
-
-请选择 [v2.5.0 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.0) 中上传的附件，不要选择 GitHub 自动生成的 **Source code** 归档。
-
-| CPU | 英文包 | 简体中文包 |
+| 安装方式 | 管理端口暴露范围 | 适用场景 |
 |---|---|---|
-| amd64 / x86_64 | `portbridge-v2.5.0-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.0-linux-amd64-zh-CN.tar.gz` |
-| arm64 / aarch64 | `portbridge-v2.5.0-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.0-linux-arm64-zh-CN.tar.gz` |
+| **[固定 v2.5.0 的验签安装](docs/INSTALL.zh-CN.md)** | 默认在 `127.0.0.1` / `::1` 的 `9080` 端口提供 HTTPS。 | 推荐使用 SSH 隧道管理。 |
+| **[交互式全新安装](docs/ONECLICK.zh-CN.md)** | 在 `0.0.0.0` 及可用 IPv6 接口提供 HTTPS，由持久化严格 IP 白名单限制访问。 | Debian/Ubuntu；选择最新的已发布稳定版。 |
 
-Release 还提供 `SHA256SUMS`、`SHA256SUMS.sig` 和 `SBOM`。快速安装只下载当前架构/语言包及两个校验文件，不需要其余三个包或 SBOM。此版本没有逐归档 `.tar.gz.sig`，也没有独立的 `release-signers` 附件。
+使用允许相应网络操作的 Linux 主机。服务安装器需要 systemd 和管理员权限，受限容器不能等同于完整主机。预编译包不需要 Go 编译器。执行下载包内脚本前先验证发布者签名；签名缺失应停止，而不是绕过校验。
 
-安装代码固定使用发布公钥，而不是信任随归档下载的未知公钥。首次使用前，应通过独立可信渠道核对指纹：
-
-```text
-SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o
-```
-
-签名身份为 `portbridge-release-v2`，命名空间为 `portbridge-release`。签名只能在可信公钥的前提下证明来源及完整性，并不保证部署没有漏洞。命令有意固定到 `2.5.0`；升级时请使用对应版本的说明与信任材料。
-
-安装前不要修改已验证包内的文件，包括 README；这些文件受内部签名清单保护。修改或重新打包 Release 后，必须重新生成清单、校验和及发布者签名。
-
-
-### 3. 打开 WebGUI
-
-默认管理入口仅监听 **`127.0.0.1` 和 `::1` 的 HTTPS 9080 端口**，不会直接暴露到公网。在管理员电脑上，将 `USER`、`SERVER` 替换为 SSH 用户和服务器地址，建立并保持隧道：
+完成仅回环监听的安装后，在管理电脑上建立 SSH 隧道：
 
 ```bash
 ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:9080:127.0.0.1:9080 USER@SERVER
 ```
 
-浏览器打开 **https://127.0.0.1:9080/**。若安装器生成了自签证书，请先核对服务器安装输出中的 SHA-256 指纹，并建立客户端信任，再登录；不要盲目忽略证书警告。
+将 `USER`、`SERVER` 换成 SSH 账户与服务器地址。打开 **https://127.0.0.1:9080/**，核对证书指纹并建立信任，再用服务器上 `/etc/portbridge/admin.token` 中的令牌登录。不要公开令牌或安装输出。完整[安装指南](docs/INSTALL.zh-CN.md)包含验签、证书导入、升级与卸载流程。
 
-在**服务器**的私密终端读取管理员令牌：
+全新安装没有转发规则。添加自有目标，保存规则并查看运行状态，再用真实 TCP/UDP 应用请求确认可用。[示例配置](docs/CONFIGURATION.md)不是生产默认配置，其中的演示规则默认禁用。
 
-```bash
-sudo cat /etc/portbridge/admin.token
-```
+## 理解实际转发路径
 
-使用该令牌登录。普通安装不会直接打印令牌，请勿将其放入截图、Issue 或部署日志。若本机 9080 已被占用，修改隧道命令中的第一个 `9080`，并使用对应的本机端口访问浏览器。
-
-## 创建第一条转发规则
-
-在 WebGUI 中添加规则，填写协议、监听地址/端口、目标主机/端口和数据面偏好。保存后检查规则状态及错误，再从获准访问的客户端测试流量。数据面列显示配置偏好，不是实际路径；运行细节请查看 `GET /api/status` 中的 `data_plane`、`go_running` 和 `kernel_state`。
-
-| 转发方向 | 数据面行为 |
+| 规则类型 | 预期规划行为 |
 |---|---|
-| IPv4 → IPv4 / IPv6 → IPv6 | 符合条件时可使用 nftables；选择 `GO` 可显式使用代理。 |
-| IPv4 → IPv6 / IPv6 → IPv4 | 使用 Go TCP/UDP 代理。 |
-| 通配监听 `*` | 分别规划 IPv4、IPv6，可能采用混合数据面，并为回环流量提供专用 Go 处理。 |
+| 符合条件的同地址族流量 | nftables DNAT/SNAT；周边防火墙满足安全准入时可启用 software flowtable 软件加速。 |
+| IPv4 ↔ IPv6、显式回环或带作用域目标 | 根据规划器要求使用 Go 代理。 |
+| `data_plane: "go"` | 明确选择 Go 代理。 |
+| `listen_host: "*"` | 分别规划 IPv4、IPv6；专用回环处理可能形成混合路径。 |
 
-端口段示例：`10000–10009 → 20000–20009`，按端口一一映射；两个范围必须等长，最多 4096 个端口。转发到私网目标时，需要**同时**设置 `allow_private_target=true` 和范围明确的 `target_cidr_allowlist`，不要宽泛地关闭目标检查。
+配置中的偏好不等于已生效的数据面。应检查 `/api/status` 的 `data_plane`、`go_running`、`kernel_state` 和错误。nftables 失败**不保证自动回退到 Go**。当前代码不添加 flowtable 的 `flags offload`，不能据此承诺网卡硬件卸载。
 
-全新安装不会加载 [config.example.json](config.example.json)。其中的规则和目标仅供演示，不是可直接使用的生产默认值。请填写自己的实际端点，并通过主机防火墙/云安全组仅允许必要的转发流量。
+访问私有目标必须同时启用 `allow_private_target` 并填写窄范围、能匹配目标的 `target_cidr_allowlist`。后者用于授权原本受限的目标，不是对所有公网出站目标生效的总白名单。与其他防火墙或 NAT 管理器共存前，请阅读[转发边界](docs/forwarding-limits.md)。
 
-**验证数据链路：**systemd 显示 `active` 不代表规则一定能转发。应查看 Web 规则状态，并验证真实 TCP 流量，以及启用 UDP 时的请求/响应流量。仅做 UDP 端口探测不能替代应用层端到端测试；防火墙冲突可能导致规则暂停，但管理服务仍正常运行。
+## 安全与运维边界
 
-## 配置与 API
+管理白名单保护 WebUI/API，**不限制转发端口**，转发端口需要单独保护。源码开发配置在准备 TLS 前可以使用回环 HTTP；安装后的服务强制 HTTPS。直接暴露管理端口必须配合原生 TLS、严格的直连来源白名单和主机/云防火墙。应用不信任转发客户端地址头。
 
-| 项目 | 路径 / 行为 |
-|---|---|
-| 安装后的程序 | `/usr/local/bin/portbridge` |
-| 服务 | `portbridge.service` |
-| 运行配置 | `/etc/portbridge/config.json` |
-| 管理员令牌 | `/etc/portbridge/admin.token` |
-| 安装器管理的 TLS 材料 | `/etc/portbridge-tls/` |
-| 规则、ACL 和 DNS 修改 | 无需重启服务即可应用。 |
-| 管理监听地址、端口或 TLS 修改 | 需要执行 `sudo systemctl restart portbridge`。 |
+Go 的连接、会话与速率预算不会自动限制 nftables 流量。Go 载荷计数与 nft L3 计数口径不同，界面合计仅为近似展示，不能累加各 hook 计数。HTTP 成功和服务 active 都不等于端到端业务健康。详见[安全说明](SECURITY.md)和[监控说明](docs/MONITORING.zh-CN.md)。
 
-[中文 API 文档](docs/API.zh-CN.md)包含认证、配置、规则、设置及运行状态接口。管理请求需要 Bearer 认证，写操作还需要处理 CSRF；请按接口文档调用，不要将其当作无需认证的 REST 服务。
+## 开发
 
-没有直接远程管理需求时，建议保留回环监听和 SSH 隧道。公网管理必须配置有效的原生 TLS、显式严格 IP 白名单，以及限制来源的主机防火墙/云安全组。`--allow` 只是临时启动 ACL，**不会**改变默认回环监听。ACL 根据直连 TCP 对端判断，不信任 `X-Forwarded-For`，因此反向代理还须自行限制真实客户端来源。详见 [SECURITY.md](SECURITY.md)及[公网管理示例](config.public.example.json)。
-
-### 使用已有 HTTPS 证书
-
-在已验证的发布包目录中，提供当前有效且匹配的证书/私钥，路径必须是服务器上的绝对路径：
+源码检出和 GitHub 自动生成的 Source code 归档不含预编译二进制。使用 **Go 1.27.1** 和随源码提供的 vendor 依赖，在仓库根目录运行：
 
 ```bash
-sudo ./scripts/install.sh --tls-cert /absolute/path/fullchain.pem --tls-key /absolute/path/privkey.pem
+go version
+GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go test ./...
+GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go test -race ./...
+GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off go vet ./...
 ```
 
-首次安装时，将这些选项加到第 2 步调用安装器的位置即可，不必先执行默认安装。导入材料会复制到受管理的 TLS 目录，原文件不修改；源路径必须符合安装器的属主、权限和非符号链接检查。升级保留已有有效证书，配置的证书无效时会停止安装。
+部分 Linux 集成测试需要额外工具、权限和隔离命名空间，跳过不代表通过。`make dist` 生成未签名的开发二进制，不是发布者签名的可安装 Release 包。详见[贡献指南](CONTRIBUTING.md)与[依赖补丁](VENDOR_PATCHES.md)。
 
-在发布包目录执行 `./scripts/install.sh --help` 可查看全部选项。`--no-start` 只准备文件和凭据，不启动服务；有意使用该选项时，应跳过快速安装末尾的 `systemctl is-active` 检查。避免在会采集日志的环境中使用 `--show-token`。
+## 文档与反馈
 
+[安装](docs/INSTALL.zh-CN.md) · [API](docs/API.zh-CN.md) · [监控](docs/MONITORING.zh-CN.md) · [UDP 设计](docs/udp-dataplane.md) · [版本说明](RELEASE_NOTES.zh-CN.md) · [发布检查表](docs/PUBLISHING.md)
 
-## 运维与排查
+普通问题可通过 [GitHub Issues](https://github.com/liying-official/Go-nftables-portbridge/issues) 提供最小复现与脱敏日志。疑似安全漏洞请遵循[安全报告流程](SECURITY.md)，不要公开令牌、私钥或未经脱敏的部署信息。
 
-```bash
-systemctl show portbridge -p ActiveState -p SubState -p Result -p NRestarts
-sudo journalctl -u portbridge -n 50 --no-pager
-```
+## 许可证
 
-正常应为 `ActiveState=active`、`SubState=running`，且没有持续重启。服务或规则异常时先检查日志，不要通过关闭 HTTPS、删除归属/恢复记录或放开管理白名单来掩盖问题。分享日志前请删除令牌及敏感运行信息。nftables 路径可使用 `sudo nft list table inet portbridge` 检查；WebGUI 将 Go/nft 累计观测值合并为近似总量，实时速率分别显示，API 与 Prometheus 保留独立来源。详见[统计边界](docs/MONITORING.zh-CN.md)。
-
-## 升级与卸载
-
-升级前请安全备份 `/etc/portbridge/` 和 `/etc/portbridge-tls/`，并安排维护窗口。下载并验证目标版本后，运行**该版本包内的安装器**。安装器会保留已有配置和规则并强制 HTTPS，但会停止/重启服务，不承诺无中断升级。不要用示例文件覆盖运行配置。
-
-卸载时，在已验证的发布包目录执行：
-
-```bash
-sudo ./scripts/uninstall.sh
-```
-
-此操作保留配置。追加 `--purge` 会同时移除配置和服务账户，仅在确认不再需要时使用；`/etc/portbridge-tls/` 有意保留。快速安装会输出解压目录，但该临时目录可能被系统清理；维护时可使用妥善保留的已验证副本，或重新下载并验证发布包。
-
-## 开发与文档
-
-本文的开发与发布流程使用 **Go 1.27.1**，源码安装器要求精确使用该工具链。模块声明的最低 Go 版本为 1.27.1，依赖已放入 `vendor/`。源码检出和 GitHub 自动生成的 Source code 归档不含预编译二进制。在源码目录执行：
-
-```bash
-GOPROXY=off go test ./...
-GOPROXY=off go test -race ./...
-GOPROXY=off go vet ./...
-make dist
-```
-
-`make dist` 生成未签名的开发二进制，**不等于可安装的签名 Release 包**。请勿绕过安装器签名检查来安装此类产物。
-
-[中文 API 文档](docs/API.zh-CN.md) · [转发边界](docs/forwarding-limits.md) · [UDP 设计与调优](docs/udp-dataplane.md) · [更新说明](RELEASE_NOTES.zh-CN.md) · [贡献指南](CONTRIBUTING.md)
-
-## 贡献与许可证
-
-欢迎提交问题、改进文档和发起 Pull Request。参与贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请遵循 [SECURITY.md](SECURITY.md)。项目对你有帮助的话，欢迎点一个 Star，让更多人发现它。
-
-本项目采用 [MIT 许可证](LICENSE)。
+PortBridge 使用 [MIT 许可证](LICENSE)。随包依赖保留各自的许可声明，参见[依赖补丁与界面资源许可](VENDOR_PATCHES.md)。

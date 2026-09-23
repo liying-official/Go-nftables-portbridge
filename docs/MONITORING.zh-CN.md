@@ -1,5 +1,7 @@
 # 流量统计与 Prometheus — v2.5.0
 
+[返回 README](../README.zh-CN.md) · [文档索引](INDEX.md)
+
 [English](MONITORING.en-US.md)
 
 控制器每秒采样一次，WebGUI 约每 500 ms 显示最新样本；API 请求和 Prometheus 抓取不会额外触发 nft/conntrack 命令。采集有资源和超时限制，控制面繁忙时跳过采样。样本超过三秒即标为不可用；首次采样、失败恢复及计数下降时，须取得有效差值后才显示速率。
@@ -72,3 +74,9 @@ portbridge_rule_bytes_per_second{source="nft",direction="up"}
 ```
 
 速率表示已观测流量，不保证覆盖全部 flowtable 报文。参考 [Linux flowtable counter 文档](https://www.kernel.org/doc/html/latest/networking/nf_flowtable.html#counters)和 [Prometheus 格式说明](https://prometheus.io/docs/instrumenting/exposition_formats/)。
+
+## Software flowtable 不等于硬件卸载
+
+生成的 flowtable 包含 `counter`，但不包含 `flags offload`，v2.5.0 不请求网卡硬件卸载。关于卸载与计数限制的说明不能证明本应用已启用硬件路径，见 [`internal/proxy/nft.go`](../internal/proxy/nft.go)。
+
+Prometheus 示例使用保留主机名 `pb.example`，需要替换为具有可信证书的实际主机。指标标签包含规则 ID，且 ID 可以由运维者提供；不要把私有部署信息写进 ID，也不要直接公开未经检查的指标转储。

@@ -1,5 +1,9 @@
 # Go-nftables-portbridge API Reference — v2.5.0
 
+[Back to README](../README.md) · [Documentation index](INDEX.md)
+
+**Example safety:** IPs in documentation ranges and `.example` hosts are placeholders, not live targets or usable public resolvers. `dns_servers: []` uses the system resolver. Replace illustrative endpoints with systems you control; never paste real tokens, configuration responses or certificate keys into public issues.
+
 **Applies to: v2.5.0**
 
 **Language:** **English** | [简体中文](API.zh-CN.md)  
@@ -82,6 +86,8 @@ The actual addresses are controlled by `web.listen_ipv4`, `web.listen_ipv6`, and
 The server's default minimum TLS version is `1.2`; setting `tls_min_version:"1.3"` raises the minimum to TLS 1.3 after restart. HTTPS responses include `Strict-Transport-Security: max-age=31536000`.[^tls][^headers]
 
 For self-signed certificates, verify the certificate fingerprint through a trusted channel first, then establish client trust. Examples in this document use `--cacert` or a Python trusted-CA file instead of bypassing certificate verification. The certificate SAN/name must also cover the address used by the client. `self_signed:false` alone does not prove that client-side trust validation succeeded.[^tls][^deployment]
+
+**Certificate-lifetime boundary:** HTTPS preparation, `--check-https` and settings validation reject expired/not-yet-valid material. The listener TLS loader itself does not enforce those dates or auto-renew certificates. A running process can outlive its certificate; monitor expiry and validate trust/name/time at the client, then replace material and restart. `https.certificate.enabled` is not proof of client trust or present validity.
 
 ### 2.2 Management IP ACL: evaluated before the token
 
@@ -372,7 +378,7 @@ A `200` from the status endpoint only means that the read succeeded. Rule startu
   "tls_cert_file": "/etc/portbridge-tls/fullchain.pem",
   "tls_key_file": "/etc/portbridge-tls/privkey.pem",
   "tls_min_version": "1.3",
-  "dns_servers": ["1.1.1.1:53", "[2606:4700:4700::1111]:53"]
+  "dns_servers": []
 }
 ```
 
@@ -406,7 +412,7 @@ These are the actual current handler/configuration-model rules. They do not impl
 
 The management `whitelist` accepts an individual IP and converts it to `/32` or `/128`; CIDRs are normalized to network prefixes, blank entries are removed, and entries are de-duplicated and sorted. IPv4-mapped IPv6 **CIDRs** are rejected; use normal IPv4 CIDRs instead.[^normalize-lists]
 
-DNS entries may be IP or IP:port. For example, IPv4 `1.1.1.1` becomes `1.1.1.1:53`, and IPv6 `2606:4700:4700::1111` becomes `[2606:4700:4700::1111]:53`. An IPv6 server with a custom port must be written `[IPv6]:port`. Ports are `1–65535`; the server address must be an IP literal, not a hostname, DoH URL, or DoT URL. Normalization preserves first-seen order while de-duplicating, with a maximum of 8 entries.[^normalize-lists]
+DNS entries may be IP or IP:port. For example, IPv4 `192.0.2.53` becomes `192.0.2.53:53`, and IPv6 `2001:db8::53` becomes `[2001:db8::53]:53`. An IPv6 server with a custom port must be written `[IPv6]:port`. Ports are `1–65535`; the server address must be an IP literal, not a hostname, DoH URL, or DoT URL. Normalization preserves first-seen order while de-duplicating, with a maximum of 8 entries.[^normalize-lists]
 
 ### 7.5 TLS file validation and implementation boundaries
 
@@ -547,7 +553,7 @@ For leftover runtime state, inspect `kernel_state` and `stats.last_error`, allow
 
 ## 10. Complete Rule Schema and Validation
 
-A Rule contains **27 JSON fields**. “Default” below means the result produced by `NormalizeRule` for API create/replace requests; it does not imply the WebGUI form's default selection. `protocol` has no API default, while omitted `enabled` becomes false.[^config-model][^normalize-rule]
+The Rule schema defines **27 possible JSON fields**, not a guarantee that each response includes all 27 (`omitempty` rules are listed in Section 10.7). “Default” below means the result produced by `NormalizeRule` for API create/replace requests; it does not imply the WebGUI form's default selection. `protocol` has no API default, while omitted `enabled` becomes false.[^config-model][^normalize-rule]
 
 ### 10.1 Identity, protocol, and target
 
@@ -813,6 +819,9 @@ Each NFTHookCounter contains `hook` (string), `bytes` and `packets` (integer/uin
 The first sample, recovery after an unavailable sample, counter decreases and overly long sampling gaps require a new valid delta. Stale reads clear validity flags but may retain old numeric rates, intervals and counters. **Neither a zero numeric rate nor a retained value establishes current traffic: require `available && rate_ready` before using a rate.** An incomplete nft sample retains the last complete flow baseline; hook data may still be usable. Go sample availability does not prove a runner is healthy or active.
 
 Flowtable synchronization may lag, and short-lived connections may never appear in a sample. Counters are process-local observations, not durable history or billing data. See [monitoring boundaries](MONITORING.en-US.md).
+
+
+**Software versus hardware:** this version emits flowtables with `counter`, without `flags offload`. `enable_flowtable:true` and `active-verified` do not establish NIC hardware offload.
 
 ## 12. Error Responses and Handling
 

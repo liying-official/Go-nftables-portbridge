@@ -1,5 +1,9 @@
 # Go-nftables-portbridge API 参考 — v2.5.0
 
+[返回 README](../README.zh-CN.md) · [文档索引](INDEX.md)
+
+**示例安全：** 文档保留地址段和 `.example` 主机名均为占位符，不是真实目标，也不是可用的公共 DNS。`dns_servers: []` 使用系统解析器。应替换为自己控制的端点，不要把真实令牌、配置响应或证书私钥粘贴到公开 Issue。
+
 **适用版本：v2.5.0**
 
 **语言：** [English](API.en-US.md) | **简体中文**  
@@ -82,6 +86,8 @@ https://[::1]:9080
 服务器默认最低 TLS 版本为 `1.2`，可通过设置中的 `tls_min_version:"1.3"` 改为最低 TLS 1.3，重启后生效。HTTPS 响应带 `Strict-Transport-Security: max-age=31536000`。[^tls][^headers]
 
 自签名证书需要先经可信渠道核对指纹，再在客户端建立信任；本文示例使用 `--cacert` 或 Python 的可信 CA 文件，不以跳过证书验证作为接入方式。证书主机名/IP 也必须覆盖请求地址。`self_signed:false` 本身不是客户端信任链验证成功的证明。[^tls][^deployment]
+
+**证书有效期边界：** HTTPS 准备、`--check-https` 和设置校验会拒绝过期或尚未生效的证书；监听器的 TLS 加载器本身不执行这项日期拒绝，也不自动续期。进程可能持续运行到证书过期之后，应监控到期时间，并由客户端验证信任链、名称和时间；更新材料后重启。`https.certificate.enabled` 不能证明客户端信任或当前仍在有效期。
 
 ### 2.2 管理 IP ACL：先于 Token 生效
 
@@ -372,7 +378,7 @@ Authorization: Bearer <admin-token>
   "tls_cert_file": "/etc/portbridge-tls/fullchain.pem",
   "tls_key_file": "/etc/portbridge-tls/privkey.pem",
   "tls_min_version": "1.3",
-  "dns_servers": ["1.1.1.1:53", "[2606:4700:4700::1111]:53"]
+  "dns_servers": []
 }
 ```
 
@@ -406,7 +412,7 @@ Authorization: Bearer <admin-token>
 
 管理 `whitelist` 接受单个 IP，并将其转成 `/32` 或 `/128`；CIDR 转为网络前缀、去掉空条目、去重、排序。IPv4-mapped IPv6 **CIDR** 被拒绝，应使用普通 IPv4 CIDR。[^normalize-lists]
 
-DNS 接受 IP 或 IP:port：IPv4 `1.1.1.1` → `1.1.1.1:53`，IPv6 `2606:4700:4700::1111` → `[2606:4700:4700::1111]:53`。IPv6 自定义端口需写 `[IPv6]:port`。端口范围 `1–65535`，服务器地址必须是 IP literal，不接受域名、DoH URL 或 DoT URL。规范化后保留首次出现顺序并去重，最多 8 个。[^normalize-lists]
+DNS 接受 IP 或 IP:port：IPv4 `192.0.2.53` → `192.0.2.53:53`，IPv6 `2001:db8::53` → `[2001:db8::53]:53`。IPv6 自定义端口需写 `[IPv6]:port`。端口范围 `1–65535`，服务器地址必须是 IP literal，不接受域名、DoH URL 或 DoT URL。规范化后保留首次出现顺序并去重，最多 8 个。[^normalize-lists]
 
 ### 7.5 TLS 文件检查与现有实现边界
 
@@ -547,7 +553,7 @@ HTTP/1.1 204 No Content
 
 ## 10. Rule 完整字段与校验规则
 
-Rule 共 **27 个 JSON 字段**。下列“默认”指 API 创建/替换时经过 `NormalizeRule` 的结果，不代表 WebGUI 表单的默认选项；其中 `protocol` 在 API 中没有默认，`enabled` 省略则为 false。[^config-model][^normalize-rule]
+Rule 结构定义 **27 个可能的 JSON 字段**，并不保证每份响应都输出 27 项；`omitempty` 规则见第 10.7 节。下列“默认”指 API 创建/替换时经过 `NormalizeRule` 的结果，不代表 WebGUI 表单的默认选项；其中 `protocol` 在 API 中没有默认，`enabled` 省略则为 false。[^config-model][^normalize-rule]
 
 ### 10.1 身份、协议与目标
 
@@ -813,6 +819,9 @@ target_cidr_allowlist
 首次采样、不可用后恢复、计数下降及过长采样间隔都需要重新取得有效差值。读取过期样本时会清除有效标志，但可能保留旧速率、间隔和累计值。**数值为零或仍保留旧值均不能证明当前流量；使用速率前必须确认 `available && rate_ready`。** nft 样本不完整时保留上次完整流基线，独立 hook 数据仍可能可用。Go 样本可用也不证明 runner 健康或正在运行。
 
 flowtable 同步可能延迟，短连接可能完全未被采样。计数是进程内观测，不是持久历史或计费数据；详见[统计边界](MONITORING.zh-CN.md)。
+
+
+**软件与硬件卸载：** 本版本生成带 `counter` 的 flowtable，不生成 `flags offload`。`enable_flowtable:true` 和 `active-verified` 均不能证明网卡硬件卸载。
 
 ## 12. 错误响应与处理方法
 

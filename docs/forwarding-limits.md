@@ -10,7 +10,20 @@ Grants are scoped to rule identity and original connection tuples, not a whole f
 
 Exact connection retirement requires protected same-identity ownership records. Missing ownership never authorizes deletion by a shared mark. Deleting a table does not prove old connections stopped. Startup can withhold forwarding during kernel inventory changes: verify rule health and real traffic, not only systemd ActiveState.
 
-Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent packets as drops while retaining valid sessions; there is no unbounded retry queue. Capacity, latency and hardware offload depend on deployment. Release archives and SBOM are authenticated by signed SHA256SUMS. Each prebuilt package has a signed internal manifest; local rebuilds are not automatically publisher-signed.
+Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent packets as drops while retaining valid sessions; there is no unbounded retry queue. Capacity and latency depend on deployment. The generated flowtable uses software acceleration: it has `counter` but no `flags offload`, so this release does not request NIC hardware offload. Release archives and SBOM are authenticated by signed SHA256SUMS. Each prebuilt package has a signed internal manifest; local rebuilds are not automatically publisher-signed.
+
+### Operational interpretation
+
+| Signal | What it proves | What it does not prove |
+|---|---|---|
+| Rule POST/PUT/DELETE success (`201` / `200` / `204`) | Desired rule configuration was persisted and Apply was invoked | End-to-end reachability or completed old-flow retirement |
+| systemd `active` | The unit reports an active state | A stable running process or every rule forwarding |
+| `active-verified` | Manager has verified corresponding kernel evidence | Application health or NIC hardware offload |
+| Strict management ACL | Direct-peer admission to Web/API | Client filtering on forwarding ports |
+
+A private target needs both the opt-in flag and a matching narrow CIDR. That CIDR list does not filter every public destination. Go budgets apply only to Go paths. Deleting a rule requests retirement, but a pending/unknown cleanup state must be examined rather than hidden by deleting records.
+
+[API](API.en-US.md) · [Security](../SECURITY.md) · [Documentation](INDEX.md)
 
 ## 简体中文
 
@@ -22,4 +35,18 @@ Go UDP uses bounded sessions and buffers. Temporary send pressure counts unsent 
 
 精确撤销依赖受保护的同身份归属记录。归属缺失不允许按共享 mark 删除连接；删表不等于旧连接停止。启动时库存变化可能暂时阻止转发，应检查规则健康及实际流量，而不只看 systemd ActiveState。
 
-Go UDP 使用有界会话和缓冲。暂时发送压力下，未发送包计入丢弃而保留有效会话，不使用无界重试队列。容量、延迟及硬件卸载取决于部署环境。Release 归档及 SBOM 通过已签名 SHA256SUMS 认证，每个预编译包包含内部签名清单；本地重新构建产物不会自动获得发布者签名。
+Go UDP 使用有界会话和缓冲。暂时发送压力下，未发送包计入丢弃而保留有效会话，不使用无界重试队列。容量与延迟取决于部署环境。当前生成的 flowtable 使用软件加速，含 `counter`、不含 `flags offload`，本版本不请求网卡硬件卸载。Release 归档及 SBOM 通过已签名 SHA256SUMS 认证，每个预编译包包含内部签名清单；本地重新构建产物不会自动获得发布者签名。
+
+
+### 运维解释
+
+| 信号 | 能说明什么 | 不能说明什么 |
+|---|---|---|
+| 规则 POST/PUT/DELETE 成功（`201` / `200` / `204`） | 期望规则配置已保存并调用 Apply | 端到端可达或旧流已完全撤销 |
+| systemd `active` | 单元报告活动状态 | 进程稳定运行或所有规则转发正常 |
+| `active-verified` | 管理器验证了相应内核证据 | 应用健康或网卡硬件卸载 |
+| 严格管理 ACL | Web/API 的直连来源准入 | 转发端口的来源过滤 |
+
+私有目标需要双重授权：开启允许标志，并命中窄范围 CIDR。该 CIDR 列表并不限制每个公网目标。Go 预算仅作用于 Go 路径。删除规则会请求撤销，但 pending/unknown 清理状态必须继续检查，不应通过删除记录掩盖。
+
+[中文 API](API.zh-CN.md) · [安全](../SECURITY.md) · [文档索引](INDEX.md)

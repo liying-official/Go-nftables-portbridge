@@ -1,5 +1,7 @@
 # Traffic statistics and Prometheus — v2.5.0
 
+[Back to README](../README.md) · [Documentation index](INDEX.md)
+
 [简体中文](MONITORING.zh-CN.md)
 
 The controller samples traffic once per second. WebGUI refreshes about every 500 ms and displays the latest sample; API requests and Prometheus scrapes do not trigger additional nft/conntrack commands. Sampling is bounded and skips contended control-plane state. A sample older than three seconds is unavailable. The first sample, recovery after a failed sample and detected counter decreases do not produce a rate until a valid delta exists.
@@ -72,3 +74,9 @@ portbridge_rule_bytes_per_second{source="nft",direction="up"}
 ```
 
 These rates are observations, not a guarantee of full flowtable accounting. See the [Linux flowtable counter documentation](https://www.kernel.org/doc/html/latest/networking/nf_flowtable.html#counters) and [Prometheus exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/).
+
+## Software flowtable is not a hardware-offload claim
+
+The generated flowtable includes `counter` but not `flags offload`. v2.5.0 does not request NIC hardware offload. Observations about offload limitations describe accounting boundaries, not proof that this application enabled a hardware path. See [`internal/proxy/nft.go`](../internal/proxy/nft.go).
+
+The Prometheus example uses the reserved host `pb.example`; replace it with a host whose certificate you trust. Rule IDs are included in labels and can be operator-supplied, so do not put private deployment details in IDs or publish an unreviewed metrics dump.

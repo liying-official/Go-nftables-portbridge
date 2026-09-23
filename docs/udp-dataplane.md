@@ -61,6 +61,14 @@ Check NIC RX/TX queues, RSS distribution, IRQ/CPU/NUMA placement and socket/soft
 
 nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.5.0.
 
+### Version scope and publication
+
+This document describes v2.5.0 implementation and resource models, not measured throughput or a capacity guarantee. Buffer-size arithmetic is not an RSS measurement. Batch availability, socket pressure and scheduler behavior depend on the Linux environment. Go UDP limits do not become nftables limits, and this release's flowtable configuration does not request NIC hardware offload.
+
+When sharing diagnostics, use synthetic endpoints and remove real source addresses, target domains, packet payloads, namespace identifiers and host paths.
+
+[Forwarding limits](forwarding-limits.md) · [API](API.en-US.md) · [Documentation](INDEX.md)
+
 ## 简体中文
 
 ### 范围与转发路径
@@ -114,3 +122,12 @@ Go 数据面未实现 UDP GRO/GSO 启用逻辑，也没有对应配置开关。�
 先检查 NIC 队列、RSS、IRQ/CPU/NUMA 分布及 socket/softnet/NIC 丢包；RPS/XPS 和绑核需要业务验证。程序默认不以 `LockOSThread` 固定每个 worker。
 
 nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.5.0 已启用的数据面。
+
+
+### 版本范围与公开材料
+
+本文说明 v2.5.0 的实现与资源模型，不是实测吞吐或容量保证；缓冲大小计算不等于 RSS 实测。批量能力、套接字压力和调度行为受 Linux 环境影响。Go UDP 的限制不会变成 nftables 的限制，当前 flowtable 配置也不请求网卡硬件卸载。
+
+分享诊断时使用合成端点，删除真实来源地址、目标域名、报文载荷、命名空间标识与机器路径。
+
+[转发边界](forwarding-limits.md) · [中文 API](API.zh-CN.md) · [文档索引](INDEX.md)

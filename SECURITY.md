@@ -1,12 +1,12 @@
 # Go-nftables-portbridge v2.5.0 — Security policy / 安全说明
 
-## Supported release
+## Scope: v2.5.0
 
 v2.5.0 supports bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule's flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Validate firewall compatibility and capacity for the intended deployment.
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use GitHub private vulnerability reporting / Security Advisories and include:
+Do not open a public issue for a suspected vulnerability. Use this repository's private vulnerability-reporting / Security Advisories channel when the repository enables it. Its availability is a repository setting, not guaranteed by this source archive. If no private channel is offered, request a private contact through an ordinary issue without vulnerability details. Include the following only in a confirmed private report:
 
 - affected version and architecture;
 - management deployment model (LAN, direct TLS, reverse proxy, VPN, or SSH tunnel);
@@ -20,7 +20,7 @@ Never include administrator tokens, SSH credentials, production configuration, T
 
 The bilingual Tabler UI serves its Core CSS/JS and selected Icons locally. The CSP keeps `script-src 'self'` and `style-src 'self'`, without unsafe inline/eval or third-party CDN permissions. Language selection is a browser preference, not an API/security setting; only that preference uses localStorage, never the administrator token.
 
-Installation and upgrades require HTTPS, including on loopback. If no certificate is configured, a unique ten-year self-signed ECDSA P-256 certificate is generated before the service starts. The installer and systemd service enforce this policy, and the settings API rejects clearing TLS paths or enabling insecure HTTP. Automatic LAN discovery remains disabled by default. Self-signed certificates encrypt traffic but require fingerprint verification and explicit client trust; never equate them with automatically trusted certificates. Existing valid certificates are preserved and invalid supplied material fails preflight. See the bilingual README for certificate import and replacement.
+Installation and upgrades require HTTPS, including on loopback. If no certificate is configured, a unique ten-year self-signed ECDSA P-256 certificate is generated before the service starts. The installer and systemd service enforce this policy, and the settings API rejects clearing TLS paths or enabling insecure HTTP. Automatic LAN discovery remains disabled by default. Self-signed certificates encrypt traffic but require fingerprint verification and explicit client trust; never equate them with automatically trusted certificates. Existing valid certificates are preserved and invalid supplied material fails preflight. See the [installation guide](docs/INSTALL.en-US.md) for certificate import and replacement.
 
 For direct public TLS:
 
@@ -51,7 +51,7 @@ At `info` level, normal startup messages omit rule names and forwarding endpoint
 
 ## Privileged data plane
 
-The service needs `CAP_NET_ADMIN` to manage only the `inet portbridge` table and `CAP_NET_BIND_SERVICE` for privileged ports. The table carries an instance-specific owner comment and all forwarding rules use a nonzero instance conntrack mark. PortBridge refuses to overwrite or remove a same-name table with a missing/mismatched marker. The supplied systemd unit removes other capabilities and applies filesystem, process, device, namespace, syscall, file-descriptor, task, CPU, and memory restrictions.
+The implementation confines its intended nftables operations to the owned `inet portbridge` table and uses `CAP_NET_BIND_SERVICE` for privileged ports. **`CAP_NET_ADMIN` itself is broader than one nftables table**: the capability is not a per-table permission, and compromise of this process can affect other network state within its network namespace. The application's owner checks and the systemd hardening do not turn that capability into a table-scoped kernel authorization. The table carries an instance-specific owner comment and all forwarding rules use a nonzero instance conntrack mark. PortBridge refuses to overwrite or remove a same-name table with a missing/mismatched marker. The supplied systemd unit removes other capabilities and applies filesystem, process, device, namespace, syscall, file-descriptor, task, CPU, and memory restrictions.
 
 nftables admission updates and conntrack retirement are separate operations. Retirement uses exact tuple/mark/common-zone matching, a persistent owned unhooked journal and visible failure states. Deleting a table alone does not prove that existing connections stopped. Unknown ownership is never guessed from a shared mark; old flows may remain when both records and process memory are lost. See the forwarding limits before cleanup or deployment.
 
@@ -61,13 +61,21 @@ Rule targets are untrusted input. Literal addresses and every DNS refresh result
 
 Global TCP connection, UDP session and estimated UDP-memory budgets apply to Go proxy paths together with per-rule and per-source limits. UDP source-session and token-bucket rate limits are shared across the rule's SO_REUSEPORT workers, port ranges, IPv4/IPv6 listeners, wildcard fallback and hybrid Go runners. They do not automatically constrain nftables/flowtable traffic; apply required kernel-path limits separately. Token buckets allow bounded bursts rather than fixed-window per-second guarantees. Monitor rejection/drop counters, socket drops, memory, file descriptors and conntrack use.
 
-The v2.5.0 Release provides four prebuilt Linux packages for amd64/arm64 and English/Simplified Chinese, plus SBOM and signed SHA256SUMS. Verify the checksum signature before extracting a package. Local builds are not automatically publisher-signed.
+The v2.5.0 release workflow packages four prebuilt Linux archives for amd64/arm64 and English/Simplified Chinese, plus SBOM and signed SHA256SUMS. Verify the checksum signature before extracting a package. Local builds are not automatically publisher-signed.
 
 ## Release integrity
 
-Prebuilt installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and source/binary hashes. The signed SHA256SUMS authenticates the four archives and SBOM; the signed internal manifest separately authenticates the installed package contents. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the private key is never shipped in the repository or archives.
+Prebuilt installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and source/binary hashes. The signed SHA256SUMS authenticates the four archives and SBOM; the signed internal manifest separately authenticates the installed package contents. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the signing private key must never be shipped in the repository or archives. The public key and its fingerprint are intended public trust material, not credentials to redact.
 
 The signing identity is `portbridge-release-v2` and the namespace is `portbridge-release`. Verify the expected key/fingerprint from a trusted source before trusting bundled signer data. Keep private-key backups offline and separate from published files.
+
+## Source defaults, certificate lifetime and publication
+
+Source-only development defaults can use loopback HTTP before preparation; the installed-service HTTPS policy above does not apply automatically to every direct `go run` or local binary invocation. A normal manual installation is loopback-only. The interactive installer opens available wildcard management listeners behind a strict allowlist; its local checks confirm saved policy and loopback access, not external positive/negative ACL tests.
+
+Certificate dates are checked during HTTPS preflight/preparation and settings validation, not by the listener TLS loader itself. There is no automatic renewal or hot reload, and a running listener can retain a certificate after expiry. Monitor dates, replace material safely, restart and verify from a validating client. `enabled` and `self_signed` metadata are not a trust or freshness guarantee.
+
+Privacy review must distinguish real deployment data from reserved examples, loopback/wildcard semantics, explicit denied-target ranges and public signature-verification material. User-selected rule IDs may also carry identifying information even when endpoint labels are omitted from metrics. See [publication checklist](docs/PUBLISHING.md). Do not treat a scan of this snapshot as a guarantee about future commits, Git history or private runtime files.
 
 ## 中文说明
 
@@ -75,7 +83,7 @@ Tabler 双语界面的 Core CSS/JS 和所需 Icons 均在本机提供，CSP 保�
 
 v2.5.0 支持逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除。部署时仍应确认防火墙兼容性和容量是否满足需求。
 
-安装与升级后包括回环监听也强制 HTTPS；未配置证书时在启动前生成每台机器独立、有效期十年的 ECDSA P-256 自签证书。安装器与 systemd 双重执行要求，设置 API 拒绝清空证书或启用明文 HTTP。自签证书提供加密但需要核对指纹并建立客户端信任，不能等同于浏览器自动信任。已有有效证书保留，无效证书在预检时报错；导入和替换流程见双语 README。默认仍关闭自动 LAN 识别，远程可使用 SSH 隧道。公网直连必须同时使用云安全组/主机防火墙、原生 TLS 与严格 IP 白名单：先配置证书并重启确认 HTTPS，再从 HTTPS 关闭自动 LAN、加入当前直连地址并启用严格模式。严格模式忽略自动 LAN 和 `--bootstrap-allow`，拒绝 `/0`，只额外保留回环恢复通道；TLS 默认最低 1.2，公网直连可设置 `web.tls_min_version=1.3`（重启生效），私钥必须是非符号链接的常规文件，通常使用 `0600` 或 `0640 root:portbridge`。
+安装与升级后包括回环监听也强制 HTTPS；未配置证书时在启动前生成每台机器独立、有效期十年的 ECDSA P-256 自签证书。安装器与 systemd 双重执行要求，设置 API 拒绝清空证书或启用明文 HTTP。自签证书提供加密但需要核对指纹并建立客户端信任，不能等同于浏览器自动信任。已有有效证书保留，无效证书在预检时报错；导入和替换流程见[安装指南](docs/INSTALL.zh-CN.md)。默认仍关闭自动 LAN 识别，远程可使用 SSH 隧道。公网直连必须同时使用云安全组/主机防火墙、原生 TLS 与严格 IP 白名单：先配置证书并重启确认 HTTPS，再从 HTTPS 关闭自动 LAN、加入当前直连地址并启用严格模式。严格模式忽略自动 LAN 和 `--bootstrap-allow`，拒绝 `/0`，只额外保留回环恢复通道；TLS 默认最低 1.2，公网直连可设置 `web.tls_min_version=1.3`（重启生效），私钥必须是非符号链接的常规文件，通常使用 `0600` 或 `0640 root:portbridge`。
 
 PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也使用 HTTPS 并验证证书/主机名，后端只监听回环/私网，并由代理和防火墙根据真实客户端执行 TLS、白名单、限流与抗 DoS；应用看到的直连来源只是代理。管理 ACL 只保护管理页面，不会限制每条转发规则的对外暴露。
 
@@ -85,10 +93,21 @@ PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也�
 
 并发轮换会在令牌文件、配置和回滚期间完整串行化，但进程或电源在两次写入之间中断仍可能造成不一致。启动时会明确告警，并继续按配置哈希认证。恢复时先停止服务，再以服务账户和相同配置/令牌路径执行 `--reset-admin-token`，随后重新启动。对运行中进程单独重置磁盘文件不会刷新其内存凭据。
 
-v2.5.0 Release 提供 amd64/arm64 × 中英双语四个 Linux 预编译包、SBOM 和已签名 SHA256SUMS。解压前先验证校验清单签名；安装器另行验证包内签名清单。本地构建产物不会自动获得发布者签名。验签步骤见 [README.zh-CN.md](README.zh-CN.md)。
+v2.5.0 发布流程打包 amd64/arm64 × 中英双语四个 Linux 预编译归档、SBOM 和已签名 SHA256SUMS。解压前先验证校验清单签名；安装器另行验证包内签名清单。本地构建产物不会自动获得发布者签名。验签步骤见[安装指南](docs/INSTALL.zh-CN.md)。
 
 签名身份为 `portbridge-release-v2`，namespace 为 `portbridge-release`。应先从可信来源核对预期公钥/指纹，再信任包内 signer；私钥备份应离线保存并与发布文件分离。
 
+代码预期只操作通过真实 owner 验证的自有表，但 **`CAP_NET_ADMIN` 本身不按 nftables 表限制权限**。进程被控制后可能修改所在网络命名空间内的其他网络状态；应用归属校验与 systemd 加固并不会把它变成仅限单表的内核授权。服务另需 `CAP_NET_BIND_SERVICE` 绑定特权端口。
+
 服务只操作真实 owner 验证后的自有表。nft 入口更新与 conntrack 撤销分属不同操作，依据完整 tuple/mark/common zone 定向处理，并用自有无 hook 恢复链及可见错误保存未完成状态。删表不等于撤销；所有权记录与进程内存同时丢失时旧流仍可能活动，不能只按共享 mark 猜测清理。详见转发限制。
 
-转发目标和每次 DNS 刷新都会拒绝未授权的本机/私网/链路本地/多播/未指定/CGNAT/云元数据地址，私网目标必须同时启用 `allow_private_target` 并填写窄范围 `target_cidr_allowlist`。连接、会话、速率和估算内存预算作用于 Go 代理路径；UDP 来源预算在同一逻辑规则的 worker、端口段、地址族、通配 fallback 和 hybrid Go runner 之间共享。速率采用允许受限突发的令牌桶，不是任意固定一秒窗口的严格计数；这些设置不会自动限制 nftables/flowtable 内核转发。预编译安装器固定 Ed25519 公钥和指纹，先拒绝替换、链接或多 key signer，再校验签名清单及源码/二进制。发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`；私钥从不随包分发。
+转发目标和每次 DNS 刷新都会拒绝未授权的本机/私网/链路本地/多播/未指定/CGNAT/云元数据地址，私网目标必须同时启用 `allow_private_target` 并填写窄范围 `target_cidr_allowlist`。连接、会话、速率和估算内存预算作用于 Go 代理路径；UDP 来源预算在同一逻辑规则的 worker、端口段、地址族、通配 fallback 和 hybrid Go runner 之间共享。速率采用允许受限突发的令牌桶，不是任意固定一秒窗口的严格计数；这些设置不会自动限制 nftables/flowtable 内核转发。预编译安装器固定 Ed25519 公钥和指纹，先拒绝替换、链接或多 key signer，再校验签名清单及源码/二进制。发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`；签名私钥不得随包分发；公钥与指纹是需要公开保留的信任材料，不应当作秘密删除。
+
+
+### 开发、证书与公开材料的补充边界
+
+未经 HTTPS 准备的源码开发配置可在回环上使用 HTTP，不能把安装后策略套用于每次直接运行二进制。手动安装默认仅回环；交互式安装会在严格白名单后开放可用的通配监听。后者的本机自检不等于外部允许/拒绝来源测试。
+
+证书日期检查发生在 HTTPS 预检、准备和设置校验阶段，监听器加载器本身不做日期拒绝，也不自动续期或热重载。运行进程可继续持有过期证书，应主动监控、替换并重启，再从验证证书的客户端复查。证书状态字段不等于信任或实时有效性保证。
+
+仓库启用了 GitHub 私密漏洞报告时优先使用该入口；源码归档不能证明入口已经开启。没有私密渠道时，可仅询问私密联系方式，不在公开 Issue 披露漏洞细节。隐私审查应区分真实部署数据、保留示例地址、回环/通配地址语义、拒绝目标范围与公开验签材料。规则 ID 也可能由用户写入识别信息。当前快照扫描不覆盖历史提交或未来运行文件，详见[发布检查表](docs/PUBLISHING.md)。

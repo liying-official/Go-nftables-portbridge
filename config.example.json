@@ -10,10 +10,7 @@
     "whitelist": [],
     "tls_cert_file": "",
     "tls_key_file": "",
-    "dns_servers": [
-      "1.1.1.1:53",
-      "[2606:4700:4700::1111]:53"
-    ],
+    "dns_servers": [],
     "admin_token_sha256": ""
   },
   "resource_limits": {
@@ -28,16 +25,16 @@
   "rules": [
     {
       "id": "example-tcp-v6-to-v4",
-      "name": "HTTPS IPv6 转 IPv4",
+      "name": "Example IPv6 to IPv4 TCP range",
       "protocol": "tcp",
-      "data_plane": "nftables",
+      "data_plane": "go",
       "listen_host": "::",
       "listen_port": 443,
       "listen_port_end": 452,
       "target_host": "192.0.2.20",
       "target_port": 443,
       "target_port_end": 452,
-      "enabled": true,
+      "enabled": false,
       "connect_timeout_seconds": 10,
       "tcp_idle_timeout_seconds": 300,
       "max_tcp_connections": 2048,
