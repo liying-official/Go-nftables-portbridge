@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"portbridge/internal/config"
 )
@@ -185,6 +186,8 @@ func (m *Manager) stopChangedRunners(plan forwardingPlan) {
 		if !exists || ruleKey(path.Rule) != ruleKey(current.rule) {
 			current.stop()
 			delete(m.runners, pathKey)
+		} else if current.name() != path.Rule.Name {
+			current.displayName.Store(path.Rule.Name)
 		}
 	}
 }
@@ -461,6 +464,9 @@ func (m *Manager) Runtime() []RuleRuntime {
 }
 
 func ruleKey(r config.Rule) string {
+	// Name is presentation-only. Every forwarding and authorization field must
+	// remain in this comparison so security changes still retire old paths.
+	r.Name = ""
 	b, _ := json.Marshal(r)
 	return string(b)
 }
@@ -473,14 +479,15 @@ func goPathSlotKey(pathKey string) string {
 }
 
 type runner struct {
-	rule      config.Rule
-	stats     *Stats
-	logger    *slog.Logger
-	resolver  *DNSResolver
-	resources *resourceBudget
-	budget    *ruleBudget
-	ctx       context.Context
-	cancel    context.CancelFunc
+	rule        config.Rule
+	displayName atomic.Value // string; the forwarding rule snapshot stays immutable
+	stats       *Stats
+	logger      *slog.Logger
+	resolver    *DNSResolver
+	resources   *resourceBudget
+	budget      *ruleBudget
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	mu      sync.Mutex
 	closers []func()
@@ -494,12 +501,16 @@ func newRunner(rule config.Rule, stats *Stats, logger *slog.Logger, resolvers ..
 		resolver = resolvers[0]
 	}
 	defaults := config.Default()
-	return &runner{
+	r := &runner{
 		rule: rule, stats: stats, logger: logger, resolver: resolver,
 		resources: newResourceBudget(defaults.Limits), budget: &ruleBudget{},
 		ctx: ctx, cancel: cancel,
 	}
+	r.displayName.Store(rule.Name)
+	return r
 }
+
+func (r *runner) name() string { return r.displayName.Load().(string) }
 
 func (r *runner) start() error {
 	protocols := []string{r.rule.Protocol}

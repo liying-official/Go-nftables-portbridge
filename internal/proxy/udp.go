@@ -142,7 +142,7 @@ func (r *runner) startUDP(ep listenEndpoint, targetPort, workerCount, totalWorke
 
 	r.addCloser(endpoint.close)
 	r.logger.Debug("high-performance UDP endpoint started",
-		"rule", r.rule.Name,
+		"rule", r.name(),
 		"listen", ep.address,
 		"workers", workerCount,
 		"rule_workers", totalWorkerCount,
@@ -329,7 +329,7 @@ func (w *udpWorker) serve() {
 			if w.stopped.Load() || w.runner.ctx.Err() != nil || errors.Is(err, unix.EBADF) {
 				return
 			}
-			w.runner.logger.Warn("UDP epoll wait failed", "rule", w.runner.rule.Name, "error", err)
+			w.runner.logger.Warn("UDP epoll wait failed", "rule", w.runner.name(), "error", err)
 			return
 		}
 
@@ -341,7 +341,7 @@ func (w *udpWorker) serve() {
 					if w.stopped.Load() || w.runner.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 						return
 					}
-					w.runner.logger.Warn("UDP batch read failed", "rule", w.runner.rule.Name, "error", err)
+					w.runner.logger.Warn("UDP batch read failed", "rule", w.runner.name(), "error", err)
 					return
 				}
 				continue

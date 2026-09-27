@@ -49,7 +49,7 @@ func (r *runner) startTCP(ep listenEndpoint, targetPort int) error {
 			client, err := listener.Accept()
 			if err != nil {
 				if r.ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
-					r.logger.Warn("TCP accept failed", "rule", r.rule.Name, "error", err)
+					r.logger.Warn("TCP accept failed", "rule", r.name(), "error", err)
 				}
 				return
 			}
@@ -79,7 +79,7 @@ func (r *runner) startTCP(ep listenEndpoint, targetPort int) error {
 func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dialer *net.Dialer) {
 	upstream, err := dialer.DialContext(r.ctx, "tcp", target)
 	if err != nil {
-		r.logger.Debug("TCP target connect failed", "rule", r.rule.Name, "client", client.RemoteAddr(), "target", target, "error", err)
+		r.logger.Debug("TCP target connect failed", "rule", r.name(), "client", client.RemoteAddr(), "target", target, "error", err)
 		return
 	}
 	active.Store(upstream, struct{}{})
