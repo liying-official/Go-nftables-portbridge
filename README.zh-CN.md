@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="docs/INSTALL.zh-CN.md">开始安装</a> ·
+  <a href="https://liying-official.github.io/Go-nftables-portbridge/">WebUI 演示</a> ·
   <a href="docs/API.zh-CN.md">API 文档</a> ·
   <a href="docs/INDEX.md">完整文档</a> ·
   <a href="https://github.com/liying-official/Go-nftables-portbridge/releases">下载发布版</a>
@@ -25,6 +26,8 @@
 **PortBridge 是一个面向 Linux 的自托管端口转发管理工具。** 它将 **nftables 内核转发**与 **Go TCP/UDP 代理**结合，提供中英双语 Web 界面和需要认证的 API，适合端口映射、服务转发以及 IPv4/IPv6 混合网络中的连接需求。
 
 在浏览器中创建规则、调整设置、查看运行状态，无需为日常规则管理反复手写 nftables 命令。
+
+可使用公开密码 `PortBridge` 体验[静态 WebUI 演示站](https://liying-official.github.io/Go-nftables-portbridge/)。演示仅使用模拟数据，不会转发真实流量。
 
 ## 为什么选择 PortBridge？
 
@@ -45,6 +48,12 @@
 | --- | --- | --- |
 | **[发布包安装与升级](docs/INSTALL.zh-CN.md)** | 按指南指定版本安装，或升级现有部署。 | 默认仅在本机提供 HTTPS，适合通过 SSH 隧道管理。 |
 | **[交互式全新安装](docs/ONECLICK.zh-CN.md)** | 在 Debian/Ubuntu 上交互配置语言、HTTPS 端口和管理白名单；仅用于全新安装。 | 对外监听 HTTPS，并以严格 IP 白名单限制访问。 |
+
+全新安装时，请先阅读[安装脚本](scripts/install-oneclick.sh)，然后在受支持主机的交互式 root shell 中运行：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/main/scripts/install-oneclick.sh)
+```
 
 请使用 [Releases](https://github.com/liying-official/Go-nftables-portbridge/releases) 中对应架构的预编译附件，按安装文档**先验签，再安装**；不要将 GitHub 自动生成的 **Source code** 归档当作安装包。完整命令、登录方式、证书配置和卸载步骤见上述指南。
 

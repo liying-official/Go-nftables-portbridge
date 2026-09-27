@@ -33,12 +33,6 @@ func (k *nftCommandIO) Chains() ([]byte, error) {
 	return k.command(5*time.Second, "", "-j", "list", "chains")
 }
 
-// Optional private read used only to prove an otherwise conflicting external
-// hook is empty or restricted transparent accept-only. It is fixed, bounded, and never user-supplied.
-type nftRulesetReader interface {
-	Ruleset() ([]byte, error)
-}
-
 func (k *nftCommandIO) Ruleset() ([]byte, error) {
 	return k.command(5*time.Second, "", "-j", "list", "ruleset")
 }

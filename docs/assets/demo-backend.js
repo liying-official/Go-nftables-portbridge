@@ -50,7 +50,7 @@
     })};
   }
   const response=(code,data)=>new Response(code===204?null:JSON.stringify(data),{status:code,headers:{'Content-Type':'application/json'}});
-  const fail=(code,key)=>response(code,{error:window.PB_I18N.t(key)});
+  const fail=(code,key)=>response(code,{error:window.PB_I18N.t(key),messageKey:key});
   const port=value=>Number.isInteger(value)&&value>=1&&value<=65535;
   function validRule(rule) {
     const listenEnd=rule.listen_port_end||rule.listen_port,targetEnd=rule.target_port_end||rule.target_port;

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -288,4 +289,30 @@ func udpActiveSessionsForTest(budget *ruleBudget, source netip.Addr) int {
 		return state.activeSessions
 	}
 	return 0
+}
+
+func BenchmarkAuditUDPSourceBudget(b *testing.B) {
+	for _, shared := range []bool{true, false} {
+		b.Run(fmt.Sprintf("shared_source_%t", shared), func(b *testing.B) {
+			budget := &ruleBudget{}
+			var ids atomic.Uint32
+			now := time.Now()
+			limits := udpSourceLimits{maxSessions: 1000000, newSessionsRate: 1000000000, packetRate: 1000000000, maxTrackedSource: 65536}
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				id := ids.Add(1)
+				if shared {
+					id = 1
+				}
+				source := netip.AddrFrom4([4]byte{192, 0, 2, byte(id)})
+				for pb.Next() {
+					if !budget.reserveUDPPacket(source, false, now, limits) {
+						b.Error("unexpected budget exhaustion")
+						return
+					}
+				}
+			})
+		})
+	}
 }

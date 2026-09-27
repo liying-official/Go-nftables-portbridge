@@ -218,7 +218,7 @@ Cache-Control: no-store
 | 空集合 | `/api/config` 的规则、白名单、DNS 列表以及 `/api/status` 的 ACL 列表通常返回 `[]` |
 | Rule 可省略字段 | `omitempty` 字段在零值/空值时不一定出现，具体见第 10 节 |
 | 累计计数器 | JSON 数字，Go 类型为 `uint64`；超大计数在 JavaScript 普通 Number 中存在整数精度边界 |
-| 错误码 | 没有机器可读业务错误码、字段错误列表或 request ID 字段 |
+| 错误本地化 | JSON 处理器错误包含 `messageKey`，可选包含 `messageArgs`；它们是界面翻译提示，不是完整的业务错误码体系。没有字段错误列表或 request ID 字段 |
 
 请求方应按文档字段发送，响应方则宜容忍未来新增字段。响应缺少可选字段时按该字段明确的零值/默认语义处理，不要把所有缺失数值都解释为“无限制”。[^json][^stats][^tls][^config-clone]
 
@@ -543,7 +543,9 @@ HTTP/1.1 204 No Content
 
 ```json
 {
-  "error": "rule \"not-found\" not found"
+  "error": "rule \"not-found\" not found",
+  "messageKey": "apiRuleNotFound",
+  "messageArgs": {"id": "not-found"}
 }
 ```
 
@@ -827,15 +829,17 @@ flowtable 同步可能延迟，短连接可能完全未被采样。计数是进�
 
 ### 12.1 JSON 错误结构
 
-处理器的标准错误只有一个字段：[^json]
+处理器使用以下增量 JSON 错误结构：[^json]
 
 ```json
 {
-  "error": "错误说明"
+  "error": "JSON 请求体不能超过 1048576 字节",
+  "messageKey": "apiJSONTooLarge",
+  "messageArgs": {"limit": 1048576}
 }
 ```
 
-没有 `code`、`message`、`details`、`errors[]` 或 `request_id`。v2.5.0 中，HTTP 处理器的固定鉴权/CSRF/JSON 错误仍有中文，配置校验等错误为英文。双语 GUI 在选择 English 时翻译已知消息，切换界面语言不改变 API 协议。**API 错误文本并不保证全英文，也没有 Accept-Language 协商。**[^auth][^json][^gui]
+`error` 保留原有诊断文本，可能是中文或英文。`messageKey` 是与界面语言无关的翻译键；不需要参数时省略 `messageArgs`。WebGUI 根据当前语言展示已知键；遇到未知键或旧版服务端时回退到 `error`。变化较多的配置校验、持久化及操作系统错误使用 `apiErrorDetail`，并通过 `messageArgs.detail` 保留原文；这类诊断细节可能没有翻译。没有 `Accept-Language` 协商，也没有 `code`、`message`、`details`、`errors[]` 或 `request_id`。客户端不应把 `messageKey` 当作完整的校验错误码体系。[^auth][^json][^gui]
 
 ### 12.2 常见状态码
 
@@ -858,24 +862,24 @@ Go ServeMux 的 GET 路由也匹配 HEAD；根路径 GET 注册还是一个兜�
 
 下表保留当前源代码措辞。动态 ID、地址、操作系统错误部分会改变；客户端应优先依据 HTTP 状态和已知操作上下文处理，不宜把所有完整字符串写死。[^auth][^json][^settings][^config-validation][^target-policy]
 
-| HTTP | `error` 示例/原文 | 检查方向 |
-|---:|---|---|
-| 401 | `管理员令牌无效` | Token 来源、长度、头格式，是否被轮换 |
-| 429 | `认证请求过于频繁，请稍后重试` | 减少错误 Token 重试，不影响合法 Token 认证 |
-| 403 | `跨站请求被拒绝` | Origin、实际 TLS scheme、Host:port、Sec-Fetch-Site |
-| 403 | `CSRF 校验失败，请刷新页面` | 重新 GET bootstrap；检查服务是否重启 |
-| 400 | `Content-Type 必须是 application/json` | 仅三个 JSON 写接口需要正确媒体类型 |
-| 400 | `JSON 格式错误: json: unknown field "extra"` | 删除不属于该请求模型的字段 |
-| 400 | `请求只能包含一个 JSON 对象` | 检查是否拼接了多个 JSON 值 |
-| 400 | `JSON 请求体不能超过 1048576 字节` | 缩小单次请求体，注意不存在批量规则接口 |
-| 400 | `web port must be 1-65535` | 设置 PUT 是否遗漏 port |
-| 400 | `tls_min_version 仅支持 1.2 或 1.3` | 使用字符串 `"1.2"` 或 `"1.3"` |
-| 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | 当前请求不是原生 HTTPS |
-| 400 | `严格 IP 白名单必须包含当前客户端地址` | 保留当前直接来源 IP 或合法回环恢复访问 |
-| 400 | `this deployment requires HTTPS: certificate/key cannot be cleared and insecure HTTP cannot be enabled` | 完整保留证书路径，不尝试 API 降级 |
-| 400 | `rule "<id>" target: local/private target 127.0.0.1 is denied by default` | 受限目标双重授权是否正确 |
-| 400 | `rule "<id>" listen and target port ranges must have the same size` | 两个范围长度一致 |
-| 404 | `rule "<id>" not found` | ID 是否来自持久配置，而不是运行态清理记录 |
+| HTTP | `error` 示例/原文 | `messageKey` | 检查方向 |
+|---:|---|---|---|
+| 401 | `管理员令牌无效` | `apiInvalidToken` | Token 来源、长度、头格式，是否被轮换 |
+| 429 | `认证请求过于频繁，请稍后重试` | `apiAuthRateLimited` | 减少错误 Token 重试，不影响合法 Token 认证 |
+| 403 | `跨站请求被拒绝` | `apiCrossSiteRejected` | Origin、实际 TLS scheme、Host:port、Sec-Fetch-Site |
+| 403 | `CSRF 校验失败，请刷新页面` | `apiCSRFFailed` | 重新 GET bootstrap；检查服务是否重启 |
+| 400 | `Content-Type 必须是 application/json` | `apiJSONContentType` | 仅三个 JSON 写接口需要正确媒体类型 |
+| 400 | `JSON 格式错误: json: unknown field "extra"` | `apiInvalidJSON` | 删除不属于该请求模型的字段 |
+| 400 | `请求只能包含一个 JSON 对象` | `apiJSONObjectOnly` | 检查是否拼接了多个 JSON 值 |
+| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | 缩小单次请求体，注意不存在批量规则接口 |
+| 400 | `web port must be 1-65535` | `apiErrorDetail` | 设置 PUT 是否遗漏 port |
+| 400 | `tls_min_version 仅支持 1.2 或 1.3` | `apiTLSMinVersion` | 使用字符串 `"1.2"` 或 `"1.3"` |
+| 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | `apiStrictRequiresHTTPS` | 当前请求不是原生 HTTPS |
+| 400 | `严格 IP 白名单必须包含当前客户端地址` | `apiStrictRequiresClient` | 保留当前直接来源 IP 或合法回环恢复访问 |
+| 400 | `this deployment requires HTTPS: certificate/key cannot be cleared and insecure HTTP cannot be enabled` | `apiErrorDetail` | 完整保留证书路径，不尝试 API 降级 |
+| 400 | `rule "<id>" target: local/private target 127.0.0.1 is denied by default` | `apiErrorDetail` | 受限目标双重授权是否正确 |
+| 400 | `rule "<id>" listen and target port ranges must have the same size` | `apiErrorDetail` | 两个范围长度一致 |
+| 404 | `rule "<id>" not found` | `apiRuleNotFound` | ID 是否来自持久配置，而不是运行态清理记录 |
 
 配置写入的 I/O 失败可能仍以 `400` 返回，因为处理器把 Store.Update 错误统一放入该分支。因此 `400` 不能机械地理解为“服务端一定没有故障”；应阅读具体错误并检查服务器权限、磁盘与配置路径。反之，2xx 也不是数据面成功承诺。[^rule-handlers][^settings]
 
@@ -1351,7 +1355,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 [^read-handlers]: [`internal/web/server.go`](../internal/web/server.go)。bootstrap、status、config 的实际响应投影。
 [^settings]: [`internal/web/server.go`](../internal/web/server.go)。设置请求模型、持久化、ACL/DNS 应用及待重启比较。
 [^rule-handlers]: [`internal/web/server.go`](../internal/web/server.go)。Token 轮换与 Rule 创建/替换/删除处理器。
-[^json]: [`internal/web/server.go`](../internal/web/server.go)。1 MiB 上限、严格 JSON 解码、APIError 与响应编码。
+[^json]: [`internal/web/server.go`](../internal/web/server.go) 与 [`internal/web/api_errors.go`](../internal/web/api_errors.go)。1 MiB 上限、严格 JSON 解码、APIError、错误本地化键与响应编码。
 [^tls]: [`internal/web/security.go`](../internal/web/security.go)、[`internal/web/tls_owner_unix.go`](../internal/web/tls_owner_unix.go)。TLS 材料读取/检查、最低版本、证书状态、Unix 权限和属主检查。
 [^config-model]: [`internal/config/config.go`](../internal/config/config.go)。Config、WebConfig、Rule、ResourceLimits、NFTConfig 的字段和 JSON 标签。
 [^config-defaults]: [`internal/config/config.go`](../internal/config/config.go)。默认配置、加载回填、新实例 mark 与全局预算默认值。

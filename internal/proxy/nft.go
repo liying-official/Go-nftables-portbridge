@@ -61,6 +61,30 @@ type nftBackend interface {
 	TopologyKey() string
 }
 
+// Optional controller capabilities stay separate from nftBackend so minimal
+// backends retain their existing fallback and conservative reporting behavior.
+type nftHealthChecker interface {
+	Healthy([]nftRuleSpec) (bool, error)
+}
+
+type nftRetirementReporter interface {
+	retirementState() nftRetirementState
+}
+
+type nftTelemetryReader interface {
+	readTelemetry() (nftTelemetry, error)
+}
+
+// Optional kernel reads are fixed, private operations, never user-supplied
+// commands. A missing capability keeps the caller's existing fallback path.
+type nftRulesetReader interface {
+	Ruleset() ([]byte, error)
+}
+
+type nftTelemetryTableReader interface {
+	telemetryTable() ([]byte, error)
+}
+
 type commandNFTBackend struct {
 	logger           *slog.Logger
 	mu               sync.Mutex

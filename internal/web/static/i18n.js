@@ -25,7 +25,10 @@
       limits:'Connection limits & timeouts', connectTimeout:'Connect timeout (seconds)', tcpIdle:'TCP idle timeout (seconds)', udpIdle:'UDP idle timeout (seconds)', maxTCP:'Maximum TCP connections', perSourceTCP:'TCP connections per source', maxUDP:'Maximum UDP sessions', perSourceUDP:'UDP sessions per source', newUDPRate:'New UDP sessions / second / source', udpPacketRate:'UDP packets / second / source',
       udpPerformance:'Go UDP performance', udpPerformanceHint:'Go UDP only. The worker budget is shared across the rule’s ports and address families; 0 selects automatically from GOMAXPROCS. Each listener requires at least one worker. Default batch: 64; packet buffer: 2048B.',
       workers:'Total UDP worker budget (0 = automatic)', batch:'Batch size', packetBuffer:'Packet buffer (bytes)', listenerBuffer:'Listener socket buffer (bytes)', sessionBuffer:'Session socket buffer (bytes)', cancel:'Cancel', saveRule:'Save rule', confirm:'Confirm', confirmDelete:'Delete this rule?', confirmDeleteBody:'Delete “{name}”? Its forwarding will stop.', confirmRotate:'Rotate the administrator token?', confirmRotateBody:'The current token will stop working immediately. Save the new token after rotation.',
-      ruleCreated:'Rule created', ruleUpdated:'Rule updated', ruleDeleted:'Rule deleted', tokenRotated:'Administrator token rotated', saved:'Saved and applied.', savedRestart:'Saved. Security mode, TLS, listener or port changes require a service restart; the running process is unchanged until then.', invalidToken:'The token is invalid or has been rotated.', unauthorized:'Unauthorized', requestFailed:'Request failed ({status})', sessionChanged:'The session changed; sign in again if needed.', daysHours:'{days}d {hours}h', hoursMinutes:'{hours}h {minutes}m', minutes:'{minutes}m'
+      ruleCreated:'Rule created', ruleUpdated:'Rule updated', ruleDeleted:'Rule deleted', tokenRotated:'Administrator token rotated', saved:'Saved and applied.', savedRestart:'Saved. Security mode, TLS, listener or port changes require a service restart; the running process is unchanged until then.', invalidToken:'The token is invalid or has been rotated.', unauthorized:'Unauthorized', requestFailed:'Request failed ({status})', sessionChanged:'The session changed; sign in again if needed.', daysHours:'{days}d {hours}h', hoursMinutes:'{hours}h {minutes}m', minutes:'{minutes}m',
+      apiAuthRateLimited:'Too many authentication requests; try again later.', apiInvalidToken:'Invalid administrator token.', apiCrossSiteRejected:'Cross-site request rejected.', apiCSRFFailed:'CSRF validation failed. Reload the page.',
+      apiTLSMinVersion:'tls_min_version must be 1.2 or 1.3.', apiStrictRequiresHTTPS:'Configure TLS and restart before enabling the strict IP allowlist over HTTPS.', apiStrictRequiresClient:'The strict IP allowlist must include your current client address.',
+      apiJSONContentType:'Content-Type must be application/json.', apiJSONTooLarge:'JSON request body must not exceed {limit} bytes.', apiInvalidJSON:'Invalid JSON: {detail}', apiJSONObjectOnly:'The request must contain exactly one JSON object.', apiRuleNotFound:'Rule "{id}" was not found.', apiErrorDetail:'Request failed: {detail}'
     },
     'zh-CN': {
       title:'PortBridge · 端口转发管理', language:'语言', dashboard:'运行概览', rules:'转发规则', access:'访问与安全', navigation:'导航', menu:'打开导航', close:'关闭', administrator:'管理员', logout:'退出', uptime:'运行时间 {value}', uptimeEmpty:'运行时间 —',
@@ -51,7 +54,10 @@
       limits:'连接限制与超时', connectTimeout:'连接超时（秒）', tcpIdle:'TCP 空闲超时（秒）', udpIdle:'UDP 空闲超时（秒）', maxTCP:'最大 TCP 连接数', perSourceTCP:'单来源 TCP 连接数', maxUDP:'最大 UDP 会话数', perSourceUDP:'单来源 UDP 会话数', newUDPRate:'单来源 UDP 新会话/秒', udpPacketRate:'单来源 UDP 包/秒',
       udpPerformance:'Go UDP 性能参数', udpPerformanceHint:'仅作用于 Go UDP。Worker 是整条规则共享的预算，按端口与地址族分摊；0 表示按 GOMAXPROCS 自动选择。每个监听 socket 至少 1 个 worker。默认 batch 64、单包缓冲 2048B。',
       workers:'UDP Worker 总预算（0=自动）', batch:'Batch Size', packetBuffer:'单包缓冲（字节）', listenerBuffer:'监听 socket 缓冲（字节）', sessionBuffer:'会话 socket 缓冲（字节）', cancel:'取消', saveRule:'保存规则', confirm:'确认', confirmDelete:'删除此规则？', confirmDeleteBody:'确定删除“{name}”吗？该规则的转发将停止。', confirmRotate:'轮换管理员令牌？', confirmRotateBody:'当前令牌将立即失效，轮换后请妥善保存新令牌。',
-      ruleCreated:'规则已创建', ruleUpdated:'规则已更新', ruleDeleted:'规则已删除', tokenRotated:'管理员令牌已轮换', saved:'已保存并立即生效。', savedRestart:'已保存。安全模式、TLS、监听地址或端口变更需重启服务；重启前当前进程配置不变。', invalidToken:'令牌无效或已轮换。', unauthorized:'未授权', requestFailed:'请求失败（{status}）', sessionChanged:'会话已变更，必要时请重新登录。', daysHours:'{days}天 {hours}时', hoursMinutes:'{hours}时 {minutes}分', minutes:'{minutes}分'
+      ruleCreated:'规则已创建', ruleUpdated:'规则已更新', ruleDeleted:'规则已删除', tokenRotated:'管理员令牌已轮换', saved:'已保存并立即生效。', savedRestart:'已保存。安全模式、TLS、监听地址或端口变更需重启服务；重启前当前进程配置不变。', invalidToken:'令牌无效或已轮换。', unauthorized:'未授权', requestFailed:'请求失败（{status}）', sessionChanged:'会话已变更，必要时请重新登录。', daysHours:'{days}天 {hours}时', hoursMinutes:'{hours}时 {minutes}分', minutes:'{minutes}分',
+      apiAuthRateLimited:'认证请求过于频繁，请稍后重试。', apiInvalidToken:'管理员令牌无效。', apiCrossSiteRejected:'跨站请求被拒绝。', apiCSRFFailed:'CSRF 校验失败，请刷新页面。',
+      apiTLSMinVersion:'tls_min_version 仅支持 1.2 或 1.3。', apiStrictRequiresHTTPS:'请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单。', apiStrictRequiresClient:'严格 IP 白名单必须包含当前客户端地址。',
+      apiJSONContentType:'Content-Type 必须是 application/json。', apiJSONTooLarge:'JSON 请求体不能超过 {limit} 字节。', apiInvalidJSON:'JSON 格式错误：{detail}', apiJSONObjectOnly:'请求只能包含一个 JSON 对象。', apiRuleNotFound:'未找到规则“{id}”。', apiErrorDetail:'请求失败：{detail}'
     }
   };
   const apiErrors = {
@@ -60,6 +66,7 @@
     'Content-Type 必须是 application/json':'Content-Type must be application/json', 'JSON 请求体不能超过 ':'JSON body must not exceed ', ' 字节':' bytes', 'JSON 格式错误: ':'Invalid JSON: ', '请求只能包含一个 JSON 对象':'The request must contain exactly one JSON object'
   };
   const supported = value => Object.hasOwn(messages,value);
+  const hasMessageKey = key => typeof key==='string' && Object.hasOwn(messages['en-US'],key) && Object.hasOwn(messages['zh-CN'],key);
   let current=document.documentElement.dataset.defaultLanguage||'en-US';
   try { const saved=localStorage.getItem('portbridge_language');if(supported(saved))current=saved; } catch {}
   if(!supported(current))current='en-US';
@@ -73,6 +80,6 @@
   }
   function setLanguage(value) { if(!supported(value))return;current=value;try{localStorage.setItem('portbridge_language',value);}catch{}apply();document.dispatchEvent(new CustomEvent('portbridge:language')); }
   function translateAPIError(message) { let result=String(message??'');if(current==='en-US')for(const [original,translated] of Object.entries(apiErrors))result=result.replaceAll(original,translated);return result; }
-  window.PB_I18N=Object.freeze({t,apply,setLanguage,translateAPIError,language:()=>current});
+  window.PB_I18N=Object.freeze({t,apply,setLanguage,translateAPIError,hasMessageKey,language:()=>current});
   apply();for(const button of document.querySelectorAll('[data-language]'))button.addEventListener('click',()=>setLanguage(button.dataset.language));
 })();

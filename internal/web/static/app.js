@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const {t,translateAPIError}=window.PB_I18N;
+const {t,translateAPIError,hasMessageKey}=window.PB_I18N;
 let token='';try{token=sessionStorage.getItem('portbridge_token')||'';}catch{}
 let csrf='',rules=[],timer=null,sessionEpoch=0;
 let polling=false;let statusRequest=null;
@@ -14,6 +14,15 @@ const mobileNavigation=window.matchMedia?window.matchMedia('(max-width:991px)'):
 function saveSession(){try{if(token)sessionStorage.setItem('portbridge_token',token);else sessionStorage.removeItem('portbridge_token');}catch{}}
 function setFeedback(slot,key,args={},error=''){feedback[slot]={key,args,error};renderFeedback();}
 function localizedError(key,args={}){const error=new Error(t(key,args));error.messageKey=key;error.messageArgs=args;return error;}
+function apiErrorFromResponse(data,status){
+  if(data&&hasMessageKey(data.messageKey)){
+    const error=new Error(typeof data.error==='string'?data.error:t('requestFailed',{status}));
+    error.messageKey=data.messageKey;
+    error.messageArgs=data.messageArgs&&typeof data.messageArgs==='object'&&!Array.isArray(data.messageArgs)?data.messageArgs:{};
+    return error;
+  }
+  return data&&typeof data.error==='string'?new Error(data.error):localizedError('requestFailed',{status});
+}
 function showError(slot,error){if(error.messageKey)setFeedback(slot,error.messageKey,error.messageArgs);else setFeedback(slot,'',{},error.message);if(slot==='toast')toastView.show();}
 function renderFeedback(){for(const [slot,id] of Object.entries({login:'loginError',settings:'settingsMsg',rule:'ruleError',toast:'toastMessage'})){const value=feedback[slot];$(id).textContent=value?(value.error?translateAPIError(value.error):t(value.key,value.args)):'';}}
 function setBusy(form,busy){form.dataset.busy=String(busy);for(const button of form.querySelectorAll('button[type=submit]'))button.disabled=busy;}
@@ -26,7 +35,7 @@ async function api(path,opts={}){
   if(response.status===401){if(requestToken===token&&epoch===sessionEpoch){token='';sessionEpoch++;saveSession();showLogin();setFeedback('login','invalidToken');}throw localizedError('unauthorized');}
   if(response.status===204)return null;
   let data={};try{data=await response.json();}catch{}
-  if(!response.ok)throw data.error?new Error(data.error):localizedError('requestFailed',{status:response.status});
+  if(!response.ok)throw apiErrorFromResponse(data,response.status);
   if(requestToken!==token||epoch!==sessionEpoch)throw localizedError('sessionChanged');
   return data;
 }

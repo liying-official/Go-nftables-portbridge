@@ -39,6 +39,8 @@ jobs:
         run: python3 scripts/build-pages-demo.py --check
       - name: Test browser-local simulation
         run: node scripts/test-pages-demo.mjs
+      - name: Test API error translations
+        run: node scripts/test-api-i18n.mjs
 
   quality:
     name: Vet and unit tests
@@ -67,6 +69,16 @@ jobs:
 
       - name: Verify vendored dependency graph
         run: go list -mod=vendor ./...
+
+      - name: Check project Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(git ls-files -z -- '*.go' ':(exclude)vendor/**' | xargs -0 -r gofmt -l)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Run gofmt on:\n%s\n' "$unformatted"
+            exit 1
+          fi
 
       - name: Go vet
         run: go vet ./...

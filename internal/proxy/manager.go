@@ -144,7 +144,31 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 	}
 	m.desiredRules = desired
 	plan := m.buildPlan(rules, allowCachedDNS)
-	goErrors := make(map[string][]string)
+	m.stopChangedRunners(plan)
+	nftResult := m.reconcileNFT(plan)
+	nftErr := nftResult.err
+	nftCleanupFailed := nftResult.cleanupFailed
+	nftInspectionFailed := nftResult.inspectionFailed
+
+	blockedRules, verifiedNFT := m.nftRetirementStatus(desired, plan, nftErr, nftInspectionFailed)
+	_, retirementAware := m.nft.(nftRetirementReporter)
+	if retirementAware {
+		nftCleanupFailed = false
+	} else if nftCleanupFailed {
+		for id, plane := range m.dataPlanes {
+			if dataPlaneUsesNFT(plane) {
+				blockedRules[id] = true
+			}
+		}
+	}
+	goErrors := m.reconcileRunners(plan, blockedRules, nftErr, nftInspectionFailed, retirementAware)
+	m.updateRuleStates(desired, plan, blockedRules, verifiedNFT, goErrors, nftErr, nftCleanupFailed)
+	m.retireRemovedRules(desired, blockedRules, nftErr, nftCleanupFailed)
+}
+
+// Stop conflicting Go listeners before changing nft state so a DNS-refresh
+// replacement can bind the same local address without leaving an old path.
+func (m *Manager) stopChangedRunners(plan forwardingPlan) {
 	desiredSlots := make(map[string]goPath, len(plan.goRules))
 	for pathKey, path := range plan.goRules {
 		desiredSlots[goPathSlotKey(pathKey)] = path
@@ -163,40 +187,49 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 			delete(m.runners, pathKey)
 		}
 	}
+}
 
+type nftReconcileResult struct {
+	err              error
+	cleanupFailed    bool
+	inspectionFailed bool
+}
+
+func (m *Manager) decideNFTAction(specs []nftRuleSpec, key string) (bool, nftReconcileResult) {
+	needsUpdate := !m.nftInitialized || key != m.nftKey
+	var result nftReconcileResult
+	if checker, ok := m.nft.(nftHealthChecker); ok {
+		healthy, healthErr := checker.Healthy(specs)
+		if healthErr != nil {
+			var admission *nftAdmissionError
+			if errors.As(healthErr, &admission) {
+				needsUpdate = true
+			} else {
+				result.err = fmt.Errorf("inspect nftables state: %w", healthErr)
+				result.cleanupFailed = true
+				result.inspectionFailed = true
+			}
+		} else if !healthy {
+			needsUpdate = true
+		}
+	}
+	return needsUpdate, result
+}
+
+func (m *Manager) reconcileNFT(plan forwardingPlan) nftReconcileResult {
 	newNFTKey := nftSpecsKey(plan.nftSpecs)
 	if specsUseFlowtable(plan.nftSpecs) {
 		newNFTKey += "\nflowtable-devices:" + m.nft.TopologyKey()
 	}
-	var nftErr error
-	nftCleanupFailed := false
-	nftInspectionFailed := false
-	needsNFTUpdate := !m.nftInitialized || newNFTKey != m.nftKey
-	if checker, ok := m.nft.(interface {
-		Healthy([]nftRuleSpec) (bool, error)
-	}); ok {
-		healthy, healthErr := checker.Healthy(plan.nftSpecs)
-		if healthErr != nil {
-			var admission *nftAdmissionError
-			if errors.As(healthErr, &admission) {
-				needsNFTUpdate = true
-			} else {
-				nftErr = fmt.Errorf("inspect nftables state: %w", healthErr)
-				nftCleanupFailed = true
-				nftInspectionFailed = true
-			}
-		} else if !healthy {
-			needsNFTUpdate = true
-		}
-	}
-	if nftErr == nil && needsNFTUpdate {
-		nftErr = m.nft.Replace(plan.nftSpecs)
-		if nftErr == nil {
+	needsNFTUpdate, result := m.decideNFTAction(plan.nftSpecs, newNFTKey)
+	if result.err == nil && needsNFTUpdate {
+		result.err = m.nft.Replace(plan.nftSpecs)
+		if result.err == nil {
 			m.nftInitialized = true
 			m.nftKey = newNFTKey
 			m.logger.Info("nftables data plane applied", "paths", len(plan.nftSpecs))
 		} else {
-			applyErr := nftErr
+			applyErr := result.err
 			if _, aware := m.nft.(nftRetirementReporter); aware {
 				m.nftInitialized = false
 				m.nftKey = ""
@@ -206,27 +239,20 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 				m.nftKey = ""
 				m.logger.Error("failed to apply nftables data plane; removed managed rules, old conntrack revocation is not established", "error", applyErr)
 			} else {
-				nftCleanupFailed = true
-				nftErr = fmt.Errorf("%w; failed to remove possibly stale nftables rules: %v", applyErr, cleanupErr)
-				m.logger.Error("failed to apply or clean up nftables data plane; stale forwarding may remain active", "error", nftErr)
+				result.cleanupFailed = true
+				result.err = fmt.Errorf("%w; failed to remove possibly stale nftables rules: %v", applyErr, cleanupErr)
+				m.logger.Error("failed to apply or clean up nftables data plane; stale forwarding may remain active", "error", result.err)
 			}
 		}
 	}
+	return result
+}
 
-	blockedRules, verifiedNFT := m.nftRetirementStatus(desired, plan, nftErr, nftInspectionFailed)
-	if _, aware := m.nft.(nftRetirementReporter); aware {
-		nftCleanupFailed = false
-	} else if nftCleanupFailed {
-		for id, plane := range m.dataPlanes {
-			if dataPlaneUsesNFT(plane) {
-				blockedRules[id] = true
-			}
-		}
-	}
-
+func (m *Manager) reconcileRunners(plan forwardingPlan, blockedRules map[string]bool, nftErr error, nftInspectionFailed, retirementAware bool) map[string][]string {
+	goErrors := make(map[string][]string)
 	blockedGoPaths := make(map[string]bool)
 	for pathKey, path := range plan.goRules {
-		if _, aware := m.nft.(nftRetirementReporter); aware {
+		if retirementAware {
 			blockedGoPaths[pathKey] = m.goPathBlockedByNFT(path.Rule, nftErr, nftInspectionFailed)
 		} else {
 			blockedGoPaths[pathKey] = blockedRules[path.RuleID]
@@ -269,7 +295,10 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 		current.stop()
 		delete(m.runners, pathKey)
 	}
+	return goErrors
+}
 
+func (m *Manager) updateRuleStates(desired map[string]config.Rule, plan forwardingPlan, blockedRules, verifiedNFT map[string]bool, goErrors map[string][]string, nftErr error, nftCleanupFailed bool) {
 	for id, r := range desired {
 		previousPlane := m.dataPlanes[id]
 		m.rules[id] = r
@@ -341,7 +370,9 @@ func (m *Manager) apply(rules []config.Rule, allowCachedDNS bool) {
 		}
 		m.stats[id].setRunning(true, "")
 	}
+}
 
+func (m *Manager) retireRemovedRules(desired map[string]config.Rule, blockedRules map[string]bool, nftErr error, nftCleanupFailed bool) {
 	for id := range m.rules {
 		if _, ok := desired[id]; !ok {
 			if blockedRules[id] {

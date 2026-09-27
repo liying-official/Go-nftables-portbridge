@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="docs/INSTALL.en-US.md">Get started</a> ·
+  <a href="https://liying-official.github.io/Go-nftables-portbridge/">WebUI demo</a> ·
   <a href="docs/API.en-US.md">API reference</a> ·
   <a href="docs/INDEX.md">Documentation</a> ·
   <a href="https://github.com/liying-official/Go-nftables-portbridge/releases">Download</a>
@@ -25,6 +26,8 @@
 **PortBridge is a self-hosted port-forwarding manager for Linux.** It combines **nftables kernel forwarding** with a **Go TCP/UDP proxy**, offering an English/Chinese Web UI and an authenticated API for port mapping, service forwarding and connections across IPv4/IPv6 networks.
 
 Create rules, adjust settings and inspect runtime state in your browser, without hand-writing nftables commands for everyday rule management.
+
+Try the [static WebUI demo](https://liying-official.github.io/Go-nftables-portbridge/) with the public password `PortBridge`. It uses simulated data and does not forward traffic.
 
 ## Why PortBridge?
 
@@ -45,6 +48,12 @@ Use a **Linux amd64 / arm64** host with **systemd**, **root/sudo** access and th
 | --- | --- | --- |
 | **[Release installation and upgrades](docs/INSTALL.en-US.md)** | Install the version pinned in the guide, or upgrade an existing deployment. | Loopback-only HTTPS by default, suitable for management through an SSH tunnel. |
 | **[Interactive fresh installation](docs/ONECLICK.en-US.md)** | Set up a fresh Debian/Ubuntu host with prompts for language, HTTPS port and management allowlist. | Externally bound HTTPS with a strict IP allowlist. |
+
+For a fresh installation, review the [installer](scripts/install-oneclick.sh) and run this command in an interactive root shell on a supported host:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/liying-official/Go-nftables-portbridge/main/scripts/install-oneclick.sh)
+```
 
 Use the prebuilt asset for your architecture from [Releases](https://github.com/liying-official/Go-nftables-portbridge/releases). Follow the guide to **verify signatures before installation**; GitHub's automatically generated **Source code** archives are not installation packages. The guides cover commands, sign-in, certificate setup and uninstalling.
 

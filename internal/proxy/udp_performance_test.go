@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"golang.org/x/net/ipv4"
-
 	"portbridge/internal/config"
 )
 
@@ -320,5 +320,47 @@ func TestUDPGlobalSessionLimitAcrossWorkers(t *testing.T) {
 	snapshot := stats.snapshot()
 	if snapshot.ActiveUDPSessions != 1 || snapshot.TotalUDPSessions != 1 || snapshot.UDPDrops != 1 {
 		t.Fatalf("unexpected UDP stats: active=%d total=%d drops=%d", snapshot.ActiveUDPSessions, snapshot.TotalUDPSessions, snapshot.UDPDrops)
+	}
+}
+
+func BenchmarkAuditUDPBatchLoopback(b *testing.B) {
+	for _, batch := range []int{1, 32, 64} {
+		b.Run(fmt.Sprintf("batch_%d_payload_512", batch), func(b *testing.B) {
+			recv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer recv.Close()
+			recv.SetReadBuffer(4 << 20)
+			send, err := net.DialUDP("udp4", nil, recv.LocalAddr().(*net.UDPAddr))
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer send.Close()
+			send.SetWriteBuffer(4 << 20)
+			rx, tx := newUDPBatchConn(recv, false), newUDPBatchConn(send, false)
+			messages := make([]ipv4.Message, batch)
+			for i := range messages {
+				messages[i].Buffers = [][]byte{make([]byte, 512)}
+			}
+			reads := makeUDPMessages(batch, 512, false)
+			b.SetBytes(int64(batch * 512))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sent, err := writeUDPBatch(tx, messages)
+				if err != nil || sent != batch {
+					b.Fatalf("sent=%d err=%v", sent, err)
+				}
+				got := 0
+				for got < batch {
+					n, e := rx.ReadBatch(reads, 0)
+					if e != nil {
+						b.Fatal(e)
+					}
+					got += n
+				}
+			}
+		})
 	}
 }

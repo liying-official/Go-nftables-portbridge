@@ -53,7 +53,9 @@ type Server struct {
 }
 
 type APIError struct {
-	Error string `json:"error"`
+	Error       string         `json:"error"`
+	MessageKey  string         `json:"messageKey,omitempty"`
+	MessageArgs map[string]any `json:"messageArgs,omitempty"`
 }
 
 func New(store *config.Store, aclManager *acl.Manager, proxies *proxy.Manager, logger *slog.Logger, tokenFile string) (*Server, error) {
@@ -264,11 +266,11 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !s.authFailures.allowFailure(ip) {
-			writeJSON(w, http.StatusTooManyRequests, APIError{Error: "认证请求过于频繁，请稍后重试"})
+			writeFixedAPIError(w, http.StatusTooManyRequests, "apiAuthRateLimited", "认证请求过于频繁，请稍后重试")
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="PortBridge"`)
-		writeJSON(w, http.StatusUnauthorized, APIError{Error: "管理员令牌无效"})
+		writeFixedAPIError(w, http.StatusUnauthorized, "apiInvalidToken", "管理员令牌无效")
 	}
 }
 
@@ -295,16 +297,16 @@ func (s *Server) requireBrowserSameOrigin(next http.HandlerFunc) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		sites := r.Header.Values("Sec-Fetch-Site")
 		if len(sites) > 1 {
-			writeJSON(w, http.StatusForbidden, APIError{Error: "跨站请求被拒绝"})
+			writeFixedAPIError(w, http.StatusForbidden, "apiCrossSiteRejected", "跨站请求被拒绝")
 			return
 		}
 		if len(sites) == 1 && sites[0] != "" && sites[0] != "same-origin" && sites[0] != "none" {
-			writeJSON(w, http.StatusForbidden, APIError{Error: "跨站请求被拒绝"})
+			writeFixedAPIError(w, http.StatusForbidden, "apiCrossSiteRejected", "跨站请求被拒绝")
 			return
 		}
 		origins := r.Header.Values("Origin")
 		if len(origins) > 1 {
-			writeJSON(w, http.StatusForbidden, APIError{Error: "跨站请求被拒绝"})
+			writeFixedAPIError(w, http.StatusForbidden, "apiCrossSiteRejected", "跨站请求被拒绝")
 			return
 		}
 		if len(origins) == 1 && origins[0] != "" {
@@ -315,7 +317,7 @@ func (s *Server) requireBrowserSameOrigin(next http.HandlerFunc) http.HandlerFun
 			}
 			if err != nil || origin.Scheme != expectedScheme || origin.User != nil || origin.Opaque != "" ||
 				origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || !strings.EqualFold(origin.Host, r.Host) {
-				writeJSON(w, http.StatusForbidden, APIError{Error: "跨站请求被拒绝"})
+				writeFixedAPIError(w, http.StatusForbidden, "apiCrossSiteRejected", "跨站请求被拒绝")
 				return
 			}
 		}
@@ -326,7 +328,7 @@ func (s *Server) requireBrowserSameOrigin(next http.HandlerFunc) http.HandlerFun
 func (s *Server) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-PortBridge-CSRF")), []byte(s.csrf)) != 1 {
-			writeJSON(w, http.StatusForbidden, APIError{Error: "CSRF 校验失败，请刷新页面"})
+			writeFixedAPIError(w, http.StatusForbidden, "apiCSRFFailed", "CSRF 校验失败，请刷新页面")
 			return
 		}
 		next(w, r)
@@ -404,17 +406,17 @@ type settingsRequest struct {
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	var req settingsRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	normalized, err := config.NormalizeWhitelist(req.Whitelist)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	normalizedDNS, err := config.NormalizeDNSServers(req.DNSServers)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	certFile := strings.TrimSpace(req.TLSCertFile)
@@ -423,23 +425,23 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch tlsMinVersion {
 	case "", config.TLSMinVersion12, config.TLSMinVersion13:
 	default:
-		writeJSON(w, http.StatusBadRequest, APIError{Error: "tls_min_version 仅支持 1.2 或 1.3"})
+		writeFixedAPIError(w, http.StatusBadRequest, "apiTLSMinVersion", "tls_min_version 仅支持 1.2 或 1.3")
 		return
 	}
 	if certFile != "" && keyFile != "" {
 		if _, err := InspectTLS(config.WebConfig{TLSCertFile: certFile, TLSKeyFile: keyFile, TLSMinVersion: tlsMinVersion}); err != nil {
-			writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+			writeAPIError(w, http.StatusBadRequest, err)
 			return
 		}
 	}
 	if req.StrictIPAllowlist {
 		if r.TLS == nil {
-			writeJSON(w, http.StatusBadRequest, APIError{Error: "请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单"})
+			writeFixedAPIError(w, http.StatusBadRequest, "apiStrictRequiresHTTPS", "请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单")
 			return
 		}
 		clientIP, parseErr := remoteIP(r.RemoteAddr)
 		if parseErr != nil || !clientIP.IsLoopback() && !prefixStringsContain(normalized, clientIP) {
-			writeJSON(w, http.StatusBadRequest, APIError{Error: "严格 IP 白名单必须包含当前客户端地址"})
+			writeFixedAPIError(w, http.StatusBadRequest, "apiStrictRequiresClient", "严格 IP 白名单必须包含当前客户端地址")
 			return
 		}
 	}
@@ -463,13 +465,13 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := s.acl.Refresh(cfg.Web.AutoLANACL, cfg.Web.StrictIPAllowlist, cfg.Web.Whitelist, prefixesToStrings(s.acl.Snapshot().Bootstrap)); err != nil {
 		_, _ = s.store.Update(func(c *config.Config) error { *c = old; return nil })
 		_ = s.acl.Refresh(old.Web.AutoLANACL, old.Web.StrictIPAllowlist, old.Web.Whitelist, prefixesToStrings(s.acl.Snapshot().Bootstrap))
-		writeJSON(w, http.StatusInternalServerError, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.proxies.SetDNSServers(cfg.Web.DNSServers)
@@ -495,7 +497,7 @@ func effectiveTLSMinVersion(version string) string {
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	token, err := s.store.RotateAdminToken(s.tokenFile)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token})
@@ -504,12 +506,12 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	var rule config.Rule
 	if err := decodeJSON(w, r, &rule); err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	id, err := config.NewRuleID()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusInternalServerError, err)
 		return
 	}
 	rule.ID = id
@@ -519,7 +521,7 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	s.proxies.Apply(cfg.Rules)
@@ -530,7 +532,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var rule config.Rule
 	if err := decodeJSON(w, r, &rule); err != nil {
-		writeJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	rule.ID = id
@@ -551,7 +553,11 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		if !found {
 			status = http.StatusNotFound
 		}
-		writeJSON(w, status, APIError{Error: err.Error()})
+		if !found {
+			writeKeyedAPIError(w, status, err, "apiRuleNotFound", map[string]any{"id": id})
+		} else {
+			writeAPIError(w, status, err)
+		}
 		return
 	}
 	s.proxies.Apply(cfg.Rules)
@@ -581,7 +587,11 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		if !found {
 			status = http.StatusNotFound
 		}
-		writeJSON(w, status, APIError{Error: err.Error()})
+		if !found {
+			writeKeyedAPIError(w, status, err, "apiRuleNotFound", map[string]any{"id": id})
+		} else {
+			writeAPIError(w, status, err)
+		}
 		return
 	}
 	s.proxies.Apply(cfg.Rules)
@@ -592,7 +602,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	defer r.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return errors.New("Content-Type 必须是 application/json")
+		return apiMessageError(errors.New("Content-Type 必须是 application/json"), "apiJSONContentType", nil)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	dec := json.NewDecoder(r.Body)
@@ -600,16 +610,16 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		var sizeErr *http.MaxBytesError
 		if errors.As(err, &sizeErr) {
-			return fmt.Errorf("JSON 请求体不能超过 %d 字节", maxJSONBodyBytes)
+			return apiMessageError(fmt.Errorf("JSON 请求体不能超过 %d 字节", maxJSONBodyBytes), "apiJSONTooLarge", map[string]any{"limit": maxJSONBodyBytes})
 		}
-		return fmt.Errorf("JSON 格式错误: %w", err)
+		return apiMessageError(fmt.Errorf("JSON 格式错误: %w", err), "apiInvalidJSON", map[string]any{"detail": err.Error()})
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		var sizeErr *http.MaxBytesError
 		if errors.As(err, &sizeErr) {
-			return fmt.Errorf("JSON 请求体不能超过 %d 字节", maxJSONBodyBytes)
+			return apiMessageError(fmt.Errorf("JSON 请求体不能超过 %d 字节", maxJSONBodyBytes), "apiJSONTooLarge", map[string]any{"limit": maxJSONBodyBytes})
 		}
-		return errors.New("请求只能包含一个 JSON 对象")
+		return apiMessageError(errors.New("请求只能包含一个 JSON 对象"), "apiJSONObjectOnly", nil)
 	}
 	return nil
 }

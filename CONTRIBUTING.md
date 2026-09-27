@@ -27,6 +27,10 @@ The `scripts/test-clean-go-netns.sh`, `scripts/test-recovery-boot-bind.sh` and `
 
 Update English and Chinese together. Preserve API field names, complete-replacement semantics, authentication/CSRF requirements and runtime-vs-desired-state distinctions. Validate shell/Python/JSON/YAML examples and relative links in a complete source checkout.
 
+Edit the repository's source documents and script variants, not localized release copies. `scripts/localize-package.py` creates `packaging/document-sources/` and `packaging/script-sources/` inside a disposable staging copy; these directories preserve original inputs for repeat localization and are not canonical repository sources. For the Pages demo, edit its simulator and translation inputs, then run `python3 scripts/build-pages-demo.py`; do not hand-edit mirrored files in `docs/assets/ui/` or `docs/index.html`.
+
+Keep project Go files formatted with Go 1.27.1 `gofmt`; CI checks tracked Go files outside `vendor/` and retains the existing vet gate. Use domain-oriented test filenames. Preserve test names, build tags and environment-variable contracts when reorganizing tests, since standalone drivers may select them.
+
 Use [the publication checklist](docs/PUBLISHING.md) before submitting screenshots, logs or evidence. Generated test credentials and private keys are not suitable evidence attachments. Documentation revisions covered by release manifests must be included before the publisher regenerates and signs a release; do not claim old signatures still authenticate modified files.
 
 ## 简体中文
@@ -46,5 +50,9 @@ Use [the publication checklist](docs/PUBLISHING.md) before submitting screenshot
 ### 文档变更
 
 中英文应同步更新。保留 API 字段名、完整替换语义、认证/CSRF 要求，以及运行态与期望态的区别。在完整源码检出中校验 shell/Python/JSON/YAML 示例与相对链接。
+
+应修改仓库中的原始文档与脚本语言版本，不直接编辑已本地化的发布副本。`scripts/localize-package.py` 在可丢弃的暂存副本内生成 `packaging/document-sources/` 和 `packaging/script-sources/`，用于保存原始输入并支持重复本地化；这些目录不是仓库规范源。Pages 演示应修改模拟器及翻译输入后运行 `python3 scripts/build-pages-demo.py`，不要手改 `docs/assets/ui/` 或 `docs/index.html` 中的镜像产物。
+
+项目 Go 文件使用 Go 1.27.1 的 `gofmt` 保持格式；CI 检查 `vendor/` 以外的已跟踪 Go 文件，并保留现有 vet 门禁。测试文件采用领域命名；整理测试时保留测试函数名、构建标签与环境变量契约，以免影响独立测试驱动的筛选。
 
 提交截图、日志或证据前使用[发布检查表](docs/PUBLISHING.md)。测试生成的凭据与私钥也不能作为证据附件公开。被发布清单覆盖的文档应在发布者重新生成并签署清单前完成修改，不能声称旧签名继续覆盖改后的文件。

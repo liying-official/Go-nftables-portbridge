@@ -78,8 +78,8 @@ for line in (out/"test-json.stdout").read_text().splitlines():
         counts[e["Action"]]+=1
         if e["Action"]=="pass":roots.add(e["Test"])
         if e["Action"]=="skip":skips.add(e["Test"])
-required={"TestNFTTrafficIsolation","TestNFTKernelLifecycle","TestAuditRegressionZeroLengthUDP",
-          "TestAuditRegressionTCPResetReleasesSession","TestAuditRegressionUDPWildcardReplyAddress",
+required={"TestNFTTrafficIsolation","TestNFTKernelLifecycle","TestUDPEmptyDatagramsAndCounters",
+          "TestTCPResetReclaimsResources","TestUDPWildcardLocalAddressIsolation",
           "TestReviewAdmissionConflictMustNotPreventRetirement","TestNFTIndependentStoreTableAndMemoryLoss",
           "TestReview246UnrelatedRuleNewAdmissionContract","TestReview246BootRolloverWithUnrelatedFirewall",
           "TestNFTEmptyHookRetirementMatrix","TestNFTBootScopeRejectsCurrentRiskWithoutDeletion",

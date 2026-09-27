@@ -137,7 +137,7 @@ func (m *Manager) SampleTelemetry() {
 	status := "not_applicable"
 	if needNFT {
 		status = "unavailable"
-		if reader, ok := backend.(interface{ readTelemetry() (nftTelemetry, error) }); ok {
+		if reader, ok := backend.(nftTelemetryReader); ok {
 			if value, err := reader.readTelemetry(); err == nil {
 				nft = value
 				status = "sampled"

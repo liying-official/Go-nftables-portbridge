@@ -47,7 +47,7 @@ func (n *commandNFTBackend) readTelemetry() (nftTelemetry, error) {
 	}
 	var data []byte
 	var err error
-	if reader, ok := kernel.(interface{ telemetryTable() ([]byte, error) }); ok {
+	if reader, ok := kernel.(nftTelemetryTableReader); ok {
 		data, err = reader.telemetryTable()
 	} else {
 		data, err = kernel.Table()

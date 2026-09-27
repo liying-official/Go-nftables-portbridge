@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,6 +33,14 @@ func (f *fakeNFTBackend) Delete() error {
 }
 
 func (f *fakeNFTBackend) TopologyKey() string { return f.topologyKey }
+
+func newTestRule(name string, port int, target string) config.Rule {
+	return config.NormalizeRule(config.Rule{
+		ID: name, Name: name, Protocol: config.ProtocolTCP,
+		ListenHost: "192.0.2.10", ListenPort: port,
+		TargetHost: target, TargetPort: port + 10000, Enabled: true,
+	})
+}
 
 func TestRenderNFTScriptDualStackRanges(t *testing.T) {
 	specs := []nftRuleSpec{
@@ -144,11 +155,7 @@ func TestNFTRangeUsesDeterministicPortMap(t *testing.T) {
 func TestManagerRefreshesNFTOnTopologyChange(t *testing.T) {
 	backend := &fakeNFTBackend{topologyKey: "eth0"}
 	m := newManagerWithNFT(testLogger(), NewDNSResolver(nil), backend)
-	rule := config.NormalizeRule(config.Rule{
-		ID: "topology", Name: "topology", Protocol: config.ProtocolTCP,
-		ListenHost: "192.0.2.10", ListenPort: 10001,
-		TargetHost: "192.0.2.1", TargetPort: 20001, Enabled: true,
-	})
+	rule := newTestRule("topology", 10001, "192.0.2.1")
 	m.Apply([]config.Rule{rule})
 	m.Refresh([]config.Rule{rule})
 	if backend.replaceCall != 1 {
@@ -165,11 +172,7 @@ func TestBuildPlanSelectsDataPlane(t *testing.T) {
 	backend := &fakeNFTBackend{}
 	m := newManagerWithNFT(testLogger(), NewDNSResolver(nil), backend)
 	rules := []config.Rule{
-		config.NormalizeRule(config.Rule{
-			ID: "same", Name: "same", Protocol: config.ProtocolTCP,
-			ListenHost: "192.0.2.10", ListenPort: 10001,
-			TargetHost: "192.0.2.1", TargetPort: 20001, Enabled: true,
-		}),
+		newTestRule("same", 10001, "192.0.2.1"),
 		config.NormalizeRule(config.Rule{
 			ID: "cross", Name: "cross", Protocol: config.ProtocolUDP,
 			ListenHost: "0.0.0.0", ListenPort: 10002,
@@ -272,11 +275,7 @@ func containsString(items []string, want string) bool {
 func TestManagerReportsNFTStatus(t *testing.T) {
 	backend := &fakeNFTBackend{}
 	m := newManagerWithNFT(testLogger(), NewDNSResolver(nil), backend)
-	rule := config.NormalizeRule(config.Rule{
-		ID: "same", Name: "same", Protocol: config.ProtocolTCP,
-		ListenHost: "192.0.2.10", ListenPort: 10001,
-		TargetHost: "192.0.2.1", TargetPort: 20001, Enabled: true,
-	})
+	rule := newTestRule("same", 10001, "192.0.2.1")
 	m.Apply([]config.Rule{rule})
 	runtime := m.Runtime()
 	if len(runtime) != 1 || runtime[0].DataPlane != DataPlaneNFT || !runtime[0].Stats.Running {
@@ -298,11 +297,7 @@ func TestManagerReportsNFTStatus(t *testing.T) {
 func TestManagerReportsNFTApplyFailure(t *testing.T) {
 	backend := &fakeNFTBackend{replaceErr: errors.New("permission denied")}
 	m := newManagerWithNFT(testLogger(), NewDNSResolver(nil), backend)
-	rule := config.NormalizeRule(config.Rule{
-		ID: "same", Name: "same", Protocol: config.ProtocolTCP,
-		ListenHost: "192.0.2.10", ListenPort: 10001,
-		TargetHost: "192.0.2.1", TargetPort: 20001, Enabled: true,
-	})
+	rule := newTestRule("same", 10001, "192.0.2.1")
 	m.Apply([]config.Rule{rule})
 	runtime := m.Runtime()
 	if len(runtime) != 1 || runtime[0].Stats.Running || !strings.Contains(runtime[0].Stats.LastError, "permission denied") {
@@ -316,11 +311,7 @@ func TestManagerReportsNFTApplyFailure(t *testing.T) {
 func TestManagerDoesNotHideStaleNFTForwardingWhenCleanupFails(t *testing.T) {
 	backend := &fakeNFTBackend{}
 	m := newManagerWithNFT(testLogger(), NewDNSResolver(nil), backend)
-	rule := config.NormalizeRule(config.Rule{
-		ID: "stale", Name: "stale", Protocol: config.ProtocolTCP,
-		ListenHost: "192.0.2.10", ListenPort: 10001,
-		TargetHost: "192.0.2.1", TargetPort: 20001, Enabled: true,
-	})
+	rule := newTestRule("stale", 10001, "192.0.2.1")
 	m.Apply([]config.Rule{rule})
 
 	backend.replaceErr = errors.New("replace denied")
@@ -345,4 +336,40 @@ func TestManagerDoesNotHideStaleNFTForwardingWhenCleanupFails(t *testing.T) {
 	if runtime = m.Runtime(); len(runtime) != 0 {
 		t.Fatalf("rule tombstone remained after successful cleanup: %+v", runtime)
 	}
+}
+
+func TestAuditExportNFTRules(t *testing.T) {
+	dir := os.Getenv("AUDIT_EVIDENCE")
+	if dir == "" {
+		t.Skip("AUDIT_EVIDENCE is not set")
+	}
+	specs := []nftRuleSpec{}
+	for _, family := range []int{4, 6} {
+		listen, target := "192.0.2.1", "198.51.100.2"
+		if family == 6 {
+			listen, target = "2001:db8:1::1", "2001:db8:2::2"
+		}
+		for _, proto := range []string{"tcp", "udp"} {
+			specs = append(specs, nftRuleSpec{RuleID: fmt.Sprintf("audit-%d-%s", family, proto), Family: family,
+				ListenHost: netip.MustParseAddr(listen), ListenPort: 18080, ListenPortEnd: 18082,
+				TargetHost: netip.MustParseAddr(target), TargetPort: 28080, TargetPortEnd: 28082,
+				Protocol: proto, ConntrackMark: config.DefaultNFTConntrackMark, EnableFlowtable: true})
+		}
+	}
+	scripts := map[string]string{
+		"nft-initial.nft":             renderNFTScript(specs, false, []string{"wan0", "lan0"}),
+		"nft-topology-refresh.nft":    renderNFTScript(specs, true, []string{"wan0", "lan0", "new0"}),
+		"nft-remove-rule-refresh.nft": renderNFTChainRefreshScript(specs[1:]),
+	}
+	for i := range specs {
+		specs[i].EnableFlowtable = false
+	}
+	scripts["nft-disable-flowtable-existing.nft"] = renderNFTScript(specs, true, nil)
+	scripts["nft-disabled-initial.nft"] = renderNFTScript(specs, false, nil)
+	for name, script := range scripts {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Logf("exported %d scripts from unmodified renderer", len(scripts))
 }

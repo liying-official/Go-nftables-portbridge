@@ -8,10 +8,6 @@ import (
 	"portbridge/internal/config"
 )
 
-type nftRetirementReporter interface {
-	retirementState() nftRetirementState
-}
-
 func nftIdentityMatchesRule(spec nftRuleSpec, id string) bool {
 	want := nftRuleIdentity(nftRuleSpec{RuleID: id})
 	got := nftRuleIdentity(spec)

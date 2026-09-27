@@ -545,10 +545,32 @@ func Validate(cfg Config) error {
 	if cfg.Version != CurrentVersion {
 		return fmt.Errorf("unsupported config version %d", cfg.Version)
 	}
-	if cfg.Web.Port < 1 || cfg.Web.Port > 65535 {
+	if err := validateWeb(cfg.Web); err != nil {
+		return err
+	}
+	if err := validateLimits(cfg.Limits); err != nil {
+		return err
+	}
+	if cfg.NFT.ConntrackMark == 0 {
+		return errors.New("nftables conntrack mark must be non-zero")
+	}
+	if cfg.Web.AdminTokenSHA != "" {
+		tokenHash, err := hex.DecodeString(cfg.Web.AdminTokenSHA)
+		if err != nil || len(tokenHash) != sha256.Size {
+			return errors.New("admin token SHA-256 must contain exactly 64 hexadecimal characters")
+		}
+	}
+	if _, err := NormalizeDNSServers(cfg.Web.DNSServers); err != nil {
+		return err
+	}
+	return validateRules(cfg.Rules, cfg.Limits)
+}
+
+func validateWeb(web WebConfig) error {
+	if web.Port < 1 || web.Port > 65535 {
 		return errors.New("web port must be 1-65535")
 	}
-	for _, host := range []string{cfg.Web.ListenIPv4, cfg.Web.ListenIPv6} {
+	for _, host := range []string{web.ListenIPv4, web.ListenIPv6} {
 		if host == "" {
 			continue
 		}
@@ -560,22 +582,22 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("invalid web listen address %q", host)
 		}
 	}
-	if cfg.Web.TLSCertFile == "" && cfg.Web.TLSKeyFile == "" && webHasNonLoopbackListener(cfg.Web) && !cfg.Web.AllowInsecureHTTP {
+	if web.TLSCertFile == "" && web.TLSKeyFile == "" && webHasNonLoopbackListener(web) && !web.AllowInsecureHTTP {
 		return errors.New("non-loopback web listeners require TLS, or the explicit allow_insecure_http risk acknowledgement")
 	}
-	normalizedWhitelist, err := NormalizeWhitelist(cfg.Web.Whitelist)
+	normalizedWhitelist, err := NormalizeWhitelist(web.Whitelist)
 	if err != nil {
 		return err
 	}
-	certFile := strings.TrimSpace(cfg.Web.TLSCertFile)
-	keyFile := strings.TrimSpace(cfg.Web.TLSKeyFile)
-	if cfg.Web.RequireHTTPS && (certFile == "" || keyFile == "" || cfg.Web.AllowInsecureHTTP) {
+	certFile := strings.TrimSpace(web.TLSCertFile)
+	keyFile := strings.TrimSpace(web.TLSKeyFile)
+	if web.RequireHTTPS && (certFile == "" || keyFile == "" || web.AllowInsecureHTTP) {
 		return errors.New("this deployment requires HTTPS: certificate/key cannot be cleared and insecure HTTP cannot be enabled")
 	}
 	if (certFile == "") != (keyFile == "") {
 		return errors.New("web TLS certificate and key files must be configured together")
 	}
-	switch cfg.Web.TLSMinVersion {
+	switch web.TLSMinVersion {
 	case "", TLSMinVersion12, TLSMinVersion13:
 	default:
 		return fmt.Errorf("web tls_min_version must be %q or %q", TLSMinVersion12, TLSMinVersion13)
@@ -587,12 +609,12 @@ func Validate(cfg Config) error {
 	}
 	for _, raw := range normalizedWhitelist {
 		prefix := netip.MustParsePrefix(raw)
-		if prefix.Bits() == 0 && !cfg.Web.AllowUnsafeAllACL {
+		if prefix.Bits() == 0 && !web.AllowUnsafeAllACL {
 			return fmt.Errorf("web whitelist rejects all-address prefix %q unless allow_unsafe_all_address_acl is explicitly enabled", raw)
 		}
 	}
-	if cfg.Web.StrictIPAllowlist {
-		if cfg.Web.AutoLANACL {
+	if web.StrictIPAllowlist {
+		if web.AutoLANACL {
 			return errors.New("strict IP allowlist mode cannot be combined with automatic LAN ACL")
 		}
 		if len(normalizedWhitelist) == 0 {
@@ -607,34 +629,30 @@ func Validate(cfg Config) error {
 			}
 		}
 	}
-	if cfg.Limits.MaxTCPConnections < 1 || cfg.Limits.MaxTCPConnections > 1_000_000 {
+	return nil
+}
+
+func validateLimits(limits ResourceLimits) error {
+	if limits.MaxTCPConnections < 1 || limits.MaxTCPConnections > 1_000_000 {
 		return errors.New("global max TCP connections must be 1-1000000")
 	}
-	if cfg.Limits.MaxUDPSessions < 1 || cfg.Limits.MaxUDPSessions > 10_000_000 {
+	if limits.MaxUDPSessions < 1 || limits.MaxUDPSessions > 10_000_000 {
 		return errors.New("global max UDP sessions must be 1-10000000")
 	}
-	if cfg.Limits.MaxUDPMemoryBytes < 64*1024*1024 || cfg.Limits.MaxUDPMemoryBytes > 1<<40 {
+	if limits.MaxUDPMemoryBytes < 64*1024*1024 || limits.MaxUDPMemoryBytes > 1<<40 {
 		return errors.New("global UDP memory budget must be 67108864-1099511627776 bytes")
 	}
-	if cfg.NFT.ConntrackMark == 0 {
-		return errors.New("nftables conntrack mark must be non-zero")
-	}
-	if cfg.Web.AdminTokenSHA != "" {
-		tokenHash, err := hex.DecodeString(cfg.Web.AdminTokenSHA)
-		if err != nil || len(tokenHash) != sha256.Size {
-			return errors.New("admin token SHA-256 must contain exactly 64 hexadecimal characters")
-		}
-	}
-	if _, err := NormalizeDNSServers(cfg.Web.DNSServers); err != nil {
-		return err
-	}
-	if len(cfg.Rules) > MaxRules {
+	return nil
+}
+
+func validateRules(rules []Rule, limits ResourceLimits) error {
+	if len(rules) > MaxRules {
 		return fmt.Errorf("configuration may contain at most %d rules", MaxRules)
 	}
 
-	seenIDs := make(map[string]struct{}, len(cfg.Rules))
-	for i := range cfg.Rules {
-		r := NormalizeRule(cfg.Rules[i])
+	seenIDs := make(map[string]struct{}, len(rules))
+	for i := range rules {
+		r := NormalizeRule(rules[i])
 		if r.ID == "" {
 			return fmt.Errorf("rule %d has empty id", i)
 		}
@@ -695,8 +713,8 @@ func Validate(cfg Config) error {
 		if r.TCPIdleTimeoutSeconds < 5 || r.TCPIdleTimeoutSeconds > 86400 {
 			return fmt.Errorf("rule %q TCP idle timeout must be 5-86400 seconds", r.ID)
 		}
-		if r.MaxTCPConnections < 1 || r.MaxTCPConnections > cfg.Limits.MaxTCPConnections {
-			return fmt.Errorf("rule %q max TCP connections must be 1-%d", r.ID, cfg.Limits.MaxTCPConnections)
+		if r.MaxTCPConnections < 1 || r.MaxTCPConnections > limits.MaxTCPConnections {
+			return fmt.Errorf("rule %q max TCP connections must be 1-%d", r.ID, limits.MaxTCPConnections)
 		}
 		if r.MaxTCPConnectionsPerIP < 1 || r.MaxTCPConnectionsPerIP > r.MaxTCPConnections {
 			return fmt.Errorf("rule %q per-source TCP limit must be 1-%d", r.ID, r.MaxTCPConnections)
@@ -707,8 +725,8 @@ func Validate(cfg Config) error {
 		if r.MaxUDPSessions < 1 || r.MaxUDPSessions > 10_000_000 {
 			return fmt.Errorf("rule %q max UDP sessions must be 1-10000000", r.ID)
 		}
-		if r.MaxUDPSessions > cfg.Limits.MaxUDPSessions {
-			return fmt.Errorf("rule %q max UDP sessions exceeds global limit %d", r.ID, cfg.Limits.MaxUDPSessions)
+		if r.MaxUDPSessions > limits.MaxUDPSessions {
+			return fmt.Errorf("rule %q max UDP sessions exceeds global limit %d", r.ID, limits.MaxUDPSessions)
 		}
 		if r.MaxUDPSessionsPerIP < 1 || r.MaxUDPSessionsPerIP > r.MaxUDPSessions {
 			return fmt.Errorf("rule %q per-source UDP session limit must be 1-%d", r.ID, r.MaxUDPSessions)
@@ -747,7 +765,7 @@ func Validate(cfg Config) error {
 			}
 		}
 	}
-	if err := validateRuleConflicts(cfg.Rules); err != nil {
+	if err := validateRuleConflicts(rules); err != nil {
 		return err
 	}
 	return nil

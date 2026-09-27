@@ -31,32 +31,45 @@ func (s *stringList) Set(v string) error {
 
 var version = "dev"
 
-func main() {
-	var cfgPath, tokenPath, logLevel string
-	var showVersion, resetToken, cleanupNFT bool
-	var validateBootstrap string
-	var bootstrap stringList
-	var prepareTLS, httpsInfo, httpsCheck, requireHTTPS bool
-	var httpsOpts httpsOptions
-	flag.StringVar(&cfgPath, "config", "/etc/portbridge/config.json", "configuration file path")
-	flag.StringVar(&tokenPath, "token-file", "/etc/portbridge/admin.token", "file containing the generated admin token")
-	flag.StringVar(&logLevel, "log-level", "info", "debug, info, warn, or error")
-	flag.BoolVar(&showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&resetToken, "reset-admin-token", false, "generate a new admin token and exit")
-	flag.BoolVar(&cleanupNFT, "cleanup-nft", false, "remove this application's owned nftables table and exit")
-	flag.StringVar(&validateBootstrap, "validate-bootstrap-allow", "", "validate a comma-separated bootstrap IP/CIDR list and exit")
-	flag.Var(&bootstrap, "bootstrap-allow", "temporary web ACL IP/CIDR; repeat or comma-separate")
-	flag.BoolVar(&prepareTLS, "prepare-https", false, "prepare required HTTPS while the service is stopped")
-	flag.BoolVar(&requireHTTPS, "require-https", false, "require HTTPS for the running management service")
-	flag.BoolVar(&httpsInfo, "https-info", false, "inspect HTTPS certificate without changing configuration")
-	flag.BoolVar(&httpsCheck, "check-https", false, "preflight existing or supplied TLS material without writes")
-	flag.StringVar(&httpsOpts.dir, "https-dir", "/etc/portbridge-tls", "managed HTTPS directory")
-	flag.StringVar(&httpsOpts.cert, "tls-cert", "", "certificate to import during HTTPS preparation")
-	flag.StringVar(&httpsOpts.key, "tls-key", "", "private key to import during HTTPS preparation")
-	flag.StringVar(&httpsOpts.language, "https-language", "en-US", "HTTPS setup message language")
-	flag.IntVar(&httpsOpts.gid, "https-gid", -1, "read-only group for prepared certificate files")
-	flag.Var(&httpsOpts.names, "tls-name", "additional DNS name or IP for a generated certificate")
+type commandOptions struct {
+	cfgPath, tokenPath, logLevel                    string
+	showVersion, resetToken, cleanupNFT             bool
+	validateBootstrap                               string
+	bootstrap                                       stringList
+	prepareTLS, httpsInfo, httpsCheck, requireHTTPS bool
+	httpsOpts                                       httpsOptions
+}
+
+func parseOptions() commandOptions {
+	var options commandOptions
+	flag.StringVar(&options.cfgPath, "config", "/etc/portbridge/config.json", "configuration file path")
+	flag.StringVar(&options.tokenPath, "token-file", "/etc/portbridge/admin.token", "file containing the generated admin token")
+	flag.StringVar(&options.logLevel, "log-level", "info", "debug, info, warn, or error")
+	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&options.resetToken, "reset-admin-token", false, "generate a new admin token and exit")
+	flag.BoolVar(&options.cleanupNFT, "cleanup-nft", false, "remove this application's owned nftables table and exit")
+	flag.StringVar(&options.validateBootstrap, "validate-bootstrap-allow", "", "validate a comma-separated bootstrap IP/CIDR list and exit")
+	flag.Var(&options.bootstrap, "bootstrap-allow", "temporary web ACL IP/CIDR; repeat or comma-separate")
+	flag.BoolVar(&options.prepareTLS, "prepare-https", false, "prepare required HTTPS while the service is stopped")
+	flag.BoolVar(&options.requireHTTPS, "require-https", false, "require HTTPS for the running management service")
+	flag.BoolVar(&options.httpsInfo, "https-info", false, "inspect HTTPS certificate without changing configuration")
+	flag.BoolVar(&options.httpsCheck, "check-https", false, "preflight existing or supplied TLS material without writes")
+	flag.StringVar(&options.httpsOpts.dir, "https-dir", "/etc/portbridge-tls", "managed HTTPS directory")
+	flag.StringVar(&options.httpsOpts.cert, "tls-cert", "", "certificate to import during HTTPS preparation")
+	flag.StringVar(&options.httpsOpts.key, "tls-key", "", "private key to import during HTTPS preparation")
+	flag.StringVar(&options.httpsOpts.language, "https-language", "en-US", "HTTPS setup message language")
+	flag.IntVar(&options.httpsOpts.gid, "https-gid", -1, "read-only group for prepared certificate files")
+	flag.Var(&options.httpsOpts.names, "tls-name", "additional DNS name or IP for a generated certificate")
 	flag.Parse()
+	return options
+}
+
+func main() {
+	options := parseOptions()
+	cfgPath, tokenPath, logLevel := options.cfgPath, options.tokenPath, options.logLevel
+	showVersion, resetToken, cleanupNFT := options.showVersion, options.resetToken, options.cleanupNFT
+	validateBootstrap, bootstrap := options.validateBootstrap, options.bootstrap
+	prepareTLS, httpsInfo, httpsCheck, requireHTTPS, httpsOpts := options.prepareTLS, options.httpsInfo, options.httpsCheck, options.requireHTTPS, options.httpsOpts
 	if err := rejectPositionalArgs(flag.Args()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -84,55 +97,15 @@ func main() {
 		return
 	}
 	if validateBootstrap != "" {
-		items := strings.Split(validateBootstrap, ",")
-		normalized, err := config.NormalizeWhitelist(items)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if !printBootstrapWhitelist(validateBootstrap) {
 			os.Exit(2)
 		}
-		for _, raw := range normalized {
-			if strings.HasSuffix(raw, "/0") {
-				fmt.Fprintln(os.Stderr, "all-address /0 bootstrap ACL entries are not allowed")
-				os.Exit(2)
-			}
-		}
-		fmt.Println(strings.Join(normalized, ","))
 		return
 	}
 
-	level := new(slog.LevelVar)
-	switch strings.ToLower(logLevel) {
-	case "debug":
-		level.Set(slog.LevelDebug)
-	case "warn":
-		level.Set(slog.LevelWarn)
-	case "error":
-		level.Set(slog.LevelError)
-	default:
-		level.Set(slog.LevelInfo)
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-	slog.SetDefault(logger)
+	logger := newLogger(logLevel)
 	if cleanupNFT {
-		nftConfig := config.Default().NFT
-		if data, readErr := os.ReadFile(cfgPath); readErr == nil { // #nosec G304 -- the local root operator explicitly selects the cleanup configuration path.
-			envelope := struct {
-				NFT config.NFTConfig `json:"nftables"`
-			}{NFT: nftConfig}
-			if err := json.Unmarshal(data, &envelope); err != nil {
-				logger.Error("cannot decode nftables cleanup configuration", "error", err)
-				os.Exit(1)
-			}
-			nftConfig = envelope.NFT
-			if nftConfig.ConntrackMark == 0 {
-				nftConfig.ConntrackMark = config.DefaultNFTConntrackMark
-			}
-		} else if !os.IsNotExist(readErr) {
-			logger.Error("cannot read nftables cleanup configuration", "error", readErr)
-			os.Exit(1)
-		}
-		if err := proxy.CleanupNFTWithConfigPath(logger, cfgPath, nftConfig); err != nil {
-			logger.Error("cannot clean up nftables data plane", "error", err)
+		if !runNFTCleanup(cfgPath, logger) {
 			os.Exit(1)
 		}
 		return
@@ -196,7 +169,78 @@ func main() {
 		os.Exit(1)
 	}
 
-	refreshStop := make(chan struct{})
+	refreshStop := startRefreshLoop(store, aclManager, proxyManager, bootstrap, logger)
+
+	sig := make(chan os.Signal, 2)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	received := <-sig
+	logger.Info("shutting down", "signal", fmt.Sprint(received))
+	close(refreshStop)
+	webServer.Close()
+	proxyManager.Stop()
+}
+
+func printBootstrapWhitelist(raw string) bool {
+	items := strings.Split(raw, ",")
+	normalized, err := config.NormalizeWhitelist(items)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return false
+	}
+	for _, entry := range normalized {
+		if strings.HasSuffix(entry, "/0") {
+			fmt.Fprintln(os.Stderr, "all-address /0 bootstrap ACL entries are not allowed")
+			return false
+		}
+	}
+	fmt.Println(strings.Join(normalized, ","))
+	return true
+}
+
+func newLogger(logLevel string) *slog.Logger {
+	level := new(slog.LevelVar)
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		level.Set(slog.LevelDebug)
+	case "warn":
+		level.Set(slog.LevelWarn)
+	case "error":
+		level.Set(slog.LevelError)
+	default:
+		level.Set(slog.LevelInfo)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(logger)
+	return logger
+}
+
+func runNFTCleanup(cfgPath string, logger *slog.Logger) bool {
+	nftConfig := config.Default().NFT
+	if data, readErr := os.ReadFile(cfgPath); readErr == nil { // #nosec G304 -- the local root operator explicitly selects the cleanup configuration path.
+		envelope := struct {
+			NFT config.NFTConfig `json:"nftables"`
+		}{NFT: nftConfig}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			logger.Error("cannot decode nftables cleanup configuration", "error", err)
+			return false
+		}
+		nftConfig = envelope.NFT
+		if nftConfig.ConntrackMark == 0 {
+			nftConfig.ConntrackMark = config.DefaultNFTConntrackMark
+		}
+	} else if !os.IsNotExist(readErr) {
+		logger.Error("cannot read nftables cleanup configuration", "error", readErr)
+		return false
+	}
+	if err := proxy.CleanupNFTWithConfigPath(logger, cfgPath, nftConfig); err != nil {
+		logger.Error("cannot clean up nftables data plane", "error", err)
+		return false
+	}
+	return true
+}
+
+func startRefreshLoop(store *config.Store, aclManager *acl.Manager, proxyManager *proxy.Manager, bootstrap []string, logger *slog.Logger) chan struct{} {
+	stop := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -208,19 +252,12 @@ func main() {
 					logger.Warn("failed to refresh interface ACL", "error", err)
 				}
 				proxyManager.Refresh(current.Rules)
-			case <-refreshStop:
+			case <-stop:
 				return
 			}
 		}
 	}()
-
-	sig := make(chan os.Signal, 2)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	received := <-sig
-	logger.Info("shutting down", "signal", fmt.Sprint(received))
-	close(refreshStop)
-	webServer.Close()
-	proxyManager.Stop()
+	return stop
 }
 
 func rejectPositionalArgs(args []string) error {

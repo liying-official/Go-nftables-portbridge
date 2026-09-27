@@ -13,7 +13,8 @@ const call=async(url,method='GET',body,token='PortBridge',csrf='public-demo-csrf
   const response=await demo.request(url,{method,headers:{Authorization:'Bearer '+token,'X-PortBridge-CSRF':csrf},...(body===undefined?{}:{body:JSON.stringify(body)})});
   return {status:response.status,data:response.status===204?null:await response.json()};
 };
-assert.equal((await call('/api/bootstrap','GET',undefined,'wrong')).status,401);
+const rejected=await call('/api/bootstrap','GET',undefined,'wrong');
+assert.equal(rejected.status,401);assert.equal(rejected.data.messageKey,'invalidToken');
 assert.equal((await call('/api/bootstrap','GET',undefined,'portbridge')).status,401);
 assert.equal((await call('/api/bootstrap')).data.csrf,'public-demo-csrf-not-a-security-token');
 const config=(await call('/api/config')).data;

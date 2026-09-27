@@ -186,6 +186,9 @@ func TestAuthenticationFailureRateLimitDoesNotBlockValidToken(t *testing.T) {
 		if recorder.Code != want {
 			t.Fatalf("attempt %d status = %d, want %d", attempt+1, recorder.Code, want)
 		}
+		if want == http.StatusTooManyRequests {
+			checkAPIError(t, recorder, want, "认证请求过于频繁，请稍后重试", "apiAuthRateLimited")
+		}
 	}
 
 	valid := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -342,6 +345,11 @@ func TestStrictAllowlistCannotBeEnabledBeforeHTTPSOrWithoutCurrentClient(t *test
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 			}
+			legacy, key := "请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单", "apiStrictRequiresHTTPS"
+			if tlsState != nil {
+				legacy, key = "严格 IP 白名单必须包含当前客户端地址", "apiStrictRequiresClient"
+			}
+			checkAPIError(t, recorder, http.StatusBadRequest, legacy, key)
 		})
 	}
 }
@@ -376,9 +384,7 @@ func TestSettingsTLSMinVersionValidationAndPersistence(t *testing.T) {
 		return recorder
 	}
 
-	if got := send("tls1.3"); got.Code != http.StatusBadRequest {
-		t.Fatalf("invalid tls_min_version status = %d, want %d", got.Code, http.StatusBadRequest)
-	}
+	checkAPIError(t, send("tls1.3"), http.StatusBadRequest, "tls_min_version 仅支持 1.2 或 1.3", "apiTLSMinVersion")
 	valid := send(config.TLSMinVersion13)
 	if valid.Code != http.StatusOK {
 		t.Fatalf("valid tls_min_version status = %d, want %d: %s", valid.Code, http.StatusOK, valid.Body.String())

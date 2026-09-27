@@ -218,7 +218,7 @@ Unknown paths, method mismatches, HTTP ACL rejection, and transport failures are
 | Empty collections | Rules, allowlists, DNS lists from `/api/config`, and ACL lists from `/api/status` generally return `[]` |
 | Optional Rule fields | `omitempty` fields may be absent when zero/empty; see Section 10 |
 | Accumulated counters | JSON numbers backed by Go `uint64`; very large values can exceed exact integer precision in JavaScript Number |
-| Error codes | There are no machine-readable business error codes, field-error arrays, or request IDs |
+| Error localization | JSON handler errors include `messageKey` and optionally `messageArgs`; these are UI translation hints, not a complete business-error taxonomy. There are no field-error arrays or request IDs |
 
 Request senders should use the documented field set; response consumers should tolerate additional future fields. When an optional response field is absent, apply that field's documented zero/default semantics rather than interpreting every missing numeric value as “unlimited.”[^json][^stats][^tls][^config-clone]
 
@@ -543,7 +543,9 @@ There is no JSON response body. A missing ID returns `404`:
 
 ```json
 {
-  "error": "rule \"not-found\" not found"
+  "error": "rule \"not-found\" not found",
+  "messageKey": "apiRuleNotFound",
+  "messageArgs": {"id": "not-found"}
 }
 ```
 
@@ -827,15 +829,17 @@ Flowtable synchronization may lag, and short-lived connections may never appear 
 
 ### 12.1 JSON error shape
 
-The handlers use a one-field standard error object:[^json]
+The handlers use this additive JSON error shape:[^json]
 
 ```json
 {
-  "error": "error description"
+  "error": "JSON 请求体不能超过 1048576 字节",
+  "messageKey": "apiJSONTooLarge",
+  "messageArgs": {"limit": 1048576}
 }
 ```
 
-There is no `code`, `message`, `details`, `errors[]`, or `request_id`. In v2.5.0, fixed authentication/CSRF/JSON handler errors can still be Chinese while configuration-validation errors are English. The bilingual GUI translates known messages when English is selected; its language switch does not change the API protocol. **API error text is not guaranteed to be entirely English and there is no Accept-Language negotiation.**[^auth][^json][^gui]
+`error` remains the legacy diagnostic string and may be Chinese or English. `messageKey` is a language-neutral translation key; `messageArgs` is omitted when no parameters are needed. The WebGUI renders a known key in the selected language and falls back to `error` for unknown keys or older servers. Variable validation, persistence, and operating-system errors use `apiErrorDetail` with the original text in `messageArgs.detail`; that detail is diagnostic and may not be translated. There is no `Accept-Language` negotiation, `code`, `message`, `details`, `errors[]`, or `request_id`. Clients should not use `messageKey` as a complete validation-code taxonomy.[^auth][^json][^gui]
 
 ### 12.2 Common status codes
 
@@ -858,24 +862,24 @@ Go ServeMux GET routes also match HEAD. The root GET registration is also a fall
 
 The table below preserves current source wording. Dynamic IDs, addresses, and operating-system error details can vary. Clients should primarily use HTTP status plus operation context instead of hard-coding entire error strings.[^auth][^json][^settings][^config-validation][^target-policy]
 
-| HTTP | Example/original `error` | What to check |
-|---:|---|---|
-| 401 | `管理员令牌无效` | Token source, length, header format, and whether rotation occurred |
-| 429 | `认证请求过于频繁，请稍后重试` | Reduce retries using bad tokens; valid-token authentication is not locked out |
-| 403 | `跨站请求被拒绝` | Origin, actual TLS scheme, Host:port, Sec-Fetch-Site |
-| 403 | `CSRF 校验失败，请刷新页面` | GET bootstrap again; check whether the service restarted |
-| 400 | `Content-Type 必须是 application/json` | Only the three JSON write endpoints need this media type |
-| 400 | `JSON 格式错误: json: unknown field "extra"` | Remove fields that do not belong to the request model |
-| 400 | `请求只能包含一个 JSON 对象` | Check for concatenated JSON values |
-| 400 | `JSON 请求体不能超过 1048576 字节` | Reduce request size; there is no batch-rule endpoint |
-| 400 | `web port must be 1-65535` | Check whether settings PUT omitted `port` |
-| 400 | `tls_min_version 仅支持 1.2 或 1.3` | Use string `"1.2"` or `"1.3"` |
-| 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | Current request is not native HTTPS |
-| 400 | `严格 IP 白名单必须包含当前客户端地址` | Keep the current direct source IP or a valid loopback recovery path |
-| 400 | `this deployment requires HTTPS: certificate/key cannot be cleared and insecure HTTP cannot be enabled` | Preserve complete certificate paths; do not attempt an API downgrade |
-| 400 | `rule "<id>" target: local/private target 127.0.0.1 is denied by default` | Verify the restricted-target dual authorization |
-| 400 | `rule "<id>" listen and target port ranges must have the same size` | Make both ranges the same length |
-| 404 | `rule "<id>" not found` | Confirm the ID comes from persistent configuration, not a runtime cleanup record |
+| HTTP | Example/original `error` | `messageKey` | What to check |
+|---:|---|---|---|
+| 401 | `管理员令牌无效` | `apiInvalidToken` | Token source, length, header format, and whether rotation occurred |
+| 429 | `认证请求过于频繁，请稍后重试` | `apiAuthRateLimited` | Reduce retries using bad tokens; valid-token authentication is not locked out |
+| 403 | `跨站请求被拒绝` | `apiCrossSiteRejected` | Origin, actual TLS scheme, Host:port, Sec-Fetch-Site |
+| 403 | `CSRF 校验失败，请刷新页面` | `apiCSRFFailed` | GET bootstrap again; check whether the service restarted |
+| 400 | `Content-Type 必须是 application/json` | `apiJSONContentType` | Only the three JSON write endpoints need this media type |
+| 400 | `JSON 格式错误: json: unknown field "extra"` | `apiInvalidJSON` | Remove fields that do not belong to the request model |
+| 400 | `请求只能包含一个 JSON 对象` | `apiJSONObjectOnly` | Check for concatenated JSON values |
+| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | Reduce request size; there is no batch-rule endpoint |
+| 400 | `web port must be 1-65535` | `apiErrorDetail` | Check whether settings PUT omitted `port` |
+| 400 | `tls_min_version 仅支持 1.2 或 1.3` | `apiTLSMinVersion` | Use string `"1.2"` or `"1.3"` |
+| 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | `apiStrictRequiresHTTPS` | Current request is not native HTTPS |
+| 400 | `严格 IP 白名单必须包含当前客户端地址` | `apiStrictRequiresClient` | Keep the current direct source IP or a valid loopback recovery path |
+| 400 | `this deployment requires HTTPS: certificate/key cannot be cleared and insecure HTTP cannot be enabled` | `apiErrorDetail` | Preserve complete certificate paths; do not attempt an API downgrade |
+| 400 | `rule "<id>" target: local/private target 127.0.0.1 is denied by default` | `apiErrorDetail` | Verify the restricted-target dual authorization |
+| 400 | `rule "<id>" listen and target port ranges must have the same size` | `apiErrorDetail` | Make both ranges the same length |
+| 404 | `rule "<id>" not found` | `apiRuleNotFound` | Confirm the ID comes from persistent configuration, not a runtime cleanup record |
 
 Configuration write I/O failure can still return `400` because handlers place `Store.Update` failures in that branch. A `400` therefore does not mechanically mean “the server itself is healthy”; read the specific error and inspect permissions, disk, and configuration path. Conversely, 2xx is not a data-plane success guarantee.[^rule-handlers][^settings]
 
@@ -1353,7 +1357,7 @@ The links below assume this file is stored in the repository `docs/` directory a
 [^read-handlers]: [`internal/web/server.go`](../internal/web/server.go). Actual bootstrap/status/config response projections.
 [^settings]: [`internal/web/server.go`](../internal/web/server.go). Settings request model, persistence, ACL/DNS application, and restart-required comparison.
 [^rule-handlers]: [`internal/web/server.go`](../internal/web/server.go). Token rotation and Rule create/replace/delete handlers.
-[^json]: [`internal/web/server.go`](../internal/web/server.go). 1 MiB limit, strict JSON decode, APIError, and response encoding.
+[^json]: [`internal/web/server.go`](../internal/web/server.go) and [`internal/web/api_errors.go`](../internal/web/api_errors.go). 1 MiB limit, strict JSON decode, APIError, error localization keys, and response encoding.
 [^tls]: [`internal/web/security.go`](../internal/web/security.go), [`internal/web/tls_owner_unix.go`](../internal/web/tls_owner_unix.go). TLS material loading/checking, minimum version, certificate status, Unix permissions, and ownership validation.
 [^config-model]: [`internal/config/config.go`](../internal/config/config.go). Config, WebConfig, Rule, ResourceLimits, NFTConfig fields and JSON tags.
 [^config-defaults]: [`internal/config/config.go`](../internal/config/config.go). Default configuration, load backfills, new-instance mark, and global budget defaults.
