@@ -26,7 +26,7 @@ This setting adds accounting overhead and normally affects newly created connect
 
 ## Prometheus `/metrics`
 
-`GET /metrics` shares the management HTTPS listener, IP allowlist and administrator Bearer authentication. It is not anonymous and does not require CSRF for GET. The response uses Prometheus text format 0.0.4. The token still grants full management API access: protect the credentials file and scraper host. Metrics label rules by ID/protocol, not names or forwarding endpoint addresses.
+`GET /metrics` shares the management HTTPS listener and direct-source IP allowlist. It accepts the administrator token or a separate monitoring token, created/rotated/revoked in WebGUI Access & security. The monitoring token can read only `/metrics`, `/api/status` and application-operation status; it cannot read configuration or write anything. Store the monitoring token in a protected scraper credential file; do not reuse the administrator token for routine scraping. GET does not require CSRF. Metrics label rules by ID/protocol, not names or forwarding endpoint addresses.
 
 ```yaml
 scrape_configs:
@@ -45,12 +45,16 @@ scrape_configs:
 
 Replace the example host and certificate paths. Verify self-signed certificate fingerprints before trusting them; do not use `insecure_skip_verify` as a shortcut. Allow the scraper's direct source IP in the management allowlist.
 
-All 15 metric families are listed below. Except for uptime, every metric has `rule_id` and `protocol` labels (`tcp`, `udp` or `both` for configured rules). The additional-label column lists label names, not a literal PromQL selector. `source` is either `go` or `nft`; `direction` is either `up` or `down`; `hook` identifies the observed hook.
+All 21 metric families are listed below. Uptime and TLS certificate metrics have no rule labels; the other families have `rule_id` and `protocol` labels (`tcp`, `udp` or `both`). The additional-label column lists label names, not a literal PromQL selector. `source` is either `go` or `nft`; `direction` is either `up` or `down`; `hook` identifies the observed hook.
 
 | Metric | Type | Additional labels | Meaning |
 |---|---|---|---|
 | `portbridge_uptime_seconds` | gauge | None; no rule labels | Seconds since the Web Server was created |
+| `portbridge_tls_certificate_loaded` | gauge | None; no rule labels | A management TLS certificate is loaded (0/1) |
+| `portbridge_tls_certificate_not_after_timestamp_seconds` | gauge | None; no rule labels | Loaded certificate's Unix expiry; absent without TLS |
+| `portbridge_tls_certificate_seconds_until_expiry` | gauge | None; no rule labels | Remaining certificate lifetime; negative after expiry; absent without TLS |
 | `portbridge_rule_running` | gauge | None | Manager running/risk flag (0/1), not end-to-end health |
+| `portbridge_rule_desired_enabled` | gauge | None | Persisted desired enabled state (0/1), not proof of forwarding |
 | `portbridge_rule_bytes_total` | counter | `source`, `direction` | Cumulative observations; Go payload or nft L3 bytes |
 | `portbridge_rule_bytes_per_second` | gauge | `source`, `direction` | Latest observed byte-rate estimate; multiply by eight for bit/s |
 | `portbridge_rule_sample_available` | gauge | `source` | Source sample is fresh and available (0/1) |
@@ -62,10 +66,14 @@ All 15 metric families are listed below. Except for uptime, every metric has `ru
 | `portbridge_nft_hooks_available` | gauge | None | Owned hook sample is fresh and available (0/1) |
 | `portbridge_nft_counter_resets_total` | counter | None | Detected decreases in kernel counters |
 | `portbridge_go_active_tcp_connections` | gauge | None | Current Go TCP connections |
+| `portbridge_go_tcp_fallbacks_total` | counter | None | Connections established through an optional Go TCP backup |
+| `portbridge_go_tcp_connect_status` | gauge | `status` | Latest optional TCP handshake-check state; **not** application-layer health |
 | `portbridge_go_active_udp_sessions` | gauge | None | Current Go UDP sessions |
 | `portbridge_go_udp_drops_total` | counter | None | Application-observed Go UDP drops, not network-wide loss |
 
-Byte-rate series are emitted only when both source validity flags are true. Byte/packet counters can remain present with the last known value or an initial zero even when unavailable; their presence does not prove a successful sample. Hook series appear only for previously observed hooks and also require `portbridge_nft_hooks_available` to assess freshness. Process restart or removal of a rule's runtime state can reset counters; they are not durable totals. The collector does not create alert rules automatically. The full JSON traffic schema is in [API section 11.5](API.en-US.md#115-trafficsnapshot-and-sampling-validity).
+Byte-rate series are emitted only when both source validity flags are true. Byte/packet counters can remain present with the last known value or an initial zero even when unavailable; their presence does not prove a successful sample. Hook series appear only for previously observed hooks and also require `portbridge_nft_hooks_available` to assess freshness. Process restart or removal of a rule's runtime state can reset counters; they are not durable totals. The full JSON traffic schema is in [API section 11.5](API.en-US.md#115-trafficsnapshot-and-sampling-validity).
+
+An importable [Grafana dashboard](monitoring/portbridge-dashboard.json) and [Prometheus alert-rule example](monitoring/portbridge-alerts.yml) are provided. Select your Prometheus data source when importing the dashboard; load the alert file through Prometheus `rule_files`. Review job labels and thresholds for your deployment. The `running` gauge can also signal unresolved old kernel forwarding; neither it nor an optional TCP connect probe establishes end-to-end service health. Alert rules are examples and are not activated by PortBridge itself. Certificate renewal is external; after validating renewed files, use the authenticated certificate-reload action in WebGUI or `POST /api/tls/reload`. Reload changes new TLS handshakes, not existing sessions or listener/TLS-minimum settings.
 
 An nft example that excludes unavailable/warming-up rate samples:
 

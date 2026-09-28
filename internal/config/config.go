@@ -55,6 +55,7 @@ type WebConfig struct {
 	TLSMinVersion     string   `json:"tls_min_version,omitempty"`
 	DNSServers        []string `json:"dns_servers"`
 	AdminTokenSHA     string   `json:"admin_token_sha256"`
+	MonitorTokenSHA   string   `json:"monitor_token_sha256,omitempty"`
 }
 
 type ResourceLimits struct {
@@ -69,33 +70,38 @@ type NFTConfig struct {
 }
 
 type Rule struct {
-	ID                     string   `json:"id"`
-	Name                   string   `json:"name"`
-	Protocol               string   `json:"protocol"`
-	DataPlane              string   `json:"data_plane,omitempty"`
-	ListenHost             string   `json:"listen_host"`
-	ListenPort             int      `json:"listen_port"`
-	ListenPortEnd          int      `json:"listen_port_end,omitempty"`
-	TargetHost             string   `json:"target_host"`
-	TargetPort             int      `json:"target_port"`
-	TargetPortEnd          int      `json:"target_port_end,omitempty"`
-	Enabled                bool     `json:"enabled"`
-	ConnectTimeoutSeconds  int      `json:"connect_timeout_seconds"`
-	TCPIdleTimeoutSeconds  int      `json:"tcp_idle_timeout_seconds"`
-	MaxTCPConnections      int      `json:"max_tcp_connections"`
-	MaxTCPConnectionsPerIP int      `json:"max_tcp_connections_per_source"`
-	UDPIdleTimeoutSeconds  int      `json:"udp_idle_timeout_seconds"`
-	MaxUDPSessions         int      `json:"max_udp_sessions"`
-	MaxUDPSessionsPerIP    int      `json:"max_udp_sessions_per_source"`
-	UDPNewSessionsPerSec   int      `json:"udp_new_sessions_per_second_per_source"`
-	UDPPacketsPerSec       int      `json:"udp_packets_per_second_per_source"`
-	UDPWorkers             int      `json:"udp_workers,omitempty"`
-	UDPBatchSize           int      `json:"udp_batch_size,omitempty"`
-	UDPPacketBufferSize    int      `json:"udp_packet_buffer_size,omitempty"`
-	UDPListenerBufferBytes int      `json:"udp_listener_buffer_bytes,omitempty"`
-	UDPSessionBufferBytes  int      `json:"udp_session_buffer_bytes,omitempty"`
-	AllowPrivateTarget     bool     `json:"allow_private_target,omitempty"`
-	TargetCIDRAllowlist    []string `json:"target_cidr_allowlist,omitempty"`
+	ID                       string   `json:"id"`
+	Name                     string   `json:"name"`
+	Protocol                 string   `json:"protocol"`
+	DataPlane                string   `json:"data_plane,omitempty"`
+	ListenHost               string   `json:"listen_host"`
+	ListenPort               int      `json:"listen_port"`
+	ListenPortEnd            int      `json:"listen_port_end,omitempty"`
+	TargetHost               string   `json:"target_host"`
+	TargetPort               int      `json:"target_port"`
+	TargetPortEnd            int      `json:"target_port_end,omitempty"`
+	BackupTargetHost         string   `json:"backup_target_host,omitempty"`
+	BackupTargetPort         int      `json:"backup_target_port,omitempty"`
+	DNSCacheTTLSeconds       int      `json:"dns_cache_ttl_seconds,omitempty"`
+	TCPHealthIntervalSeconds int      `json:"tcp_health_interval_seconds,omitempty"`
+	TCPHealthTimeoutSeconds  int      `json:"tcp_health_timeout_seconds,omitempty"`
+	Enabled                  bool     `json:"enabled"`
+	ConnectTimeoutSeconds    int      `json:"connect_timeout_seconds"`
+	TCPIdleTimeoutSeconds    int      `json:"tcp_idle_timeout_seconds"`
+	MaxTCPConnections        int      `json:"max_tcp_connections"`
+	MaxTCPConnectionsPerIP   int      `json:"max_tcp_connections_per_source"`
+	UDPIdleTimeoutSeconds    int      `json:"udp_idle_timeout_seconds"`
+	MaxUDPSessions           int      `json:"max_udp_sessions"`
+	MaxUDPSessionsPerIP      int      `json:"max_udp_sessions_per_source"`
+	UDPNewSessionsPerSec     int      `json:"udp_new_sessions_per_second_per_source"`
+	UDPPacketsPerSec         int      `json:"udp_packets_per_second_per_source"`
+	UDPWorkers               int      `json:"udp_workers,omitempty"`
+	UDPBatchSize             int      `json:"udp_batch_size,omitempty"`
+	UDPPacketBufferSize      int      `json:"udp_packet_buffer_size,omitempty"`
+	UDPListenerBufferBytes   int      `json:"udp_listener_buffer_bytes,omitempty"`
+	UDPSessionBufferBytes    int      `json:"udp_session_buffer_bytes,omitempty"`
+	AllowPrivateTarget       bool     `json:"allow_private_target,omitempty"`
+	TargetCIDRAllowlist      []string `json:"target_cidr_allowlist,omitempty"`
 }
 
 type Config struct {
@@ -223,6 +229,12 @@ func (s *Store) Get() Config {
 	return clone(s.cfg)
 }
 
+func (s *Store) TokenHashes() (admin, monitor string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Web.AdminTokenSHA, s.cfg.Web.MonitorTokenSHA
+}
+
 func (s *Store) Update(fn func(*Config) error) (Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -347,6 +359,30 @@ func (s *Store) RotateAdminToken(tokenFile string) (string, error) {
 	return token, nil
 }
 
+// RotateMonitorToken persists only the hash. The plaintext is returned once
+// to the administrator and is never written to the configuration or logs.
+func (s *Store) RotateMonitorToken() (string, error) {
+	token, err := GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.Update(func(c *Config) error {
+		c.Web.MonitorTokenSHA = HashToken(token)
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *Store) RevokeMonitorToken() error {
+	_, err := s.Update(func(c *Config) error {
+		c.Web.MonitorTokenSHA = ""
+		return nil
+	})
+	return err
+}
+
 // TokenFileConsistent reports whether the token file content matches the
 // configured admin-token hash. A mismatch or an unreadable file means an
 // interrupted rotation or a deleted token file: the service keeps running on
@@ -393,11 +429,21 @@ func NormalizeRule(r Rule) Rule {
 	}
 	r.ListenHost = normalizeHost(r.ListenHost)
 	r.TargetHost = normalizeHost(r.TargetHost)
+	r.BackupTargetHost = normalizeHost(r.BackupTargetHost)
 	if r.ListenHost == "" {
 		r.ListenHost = "*"
 	}
 	if r.ConnectTimeoutSeconds == 0 {
 		r.ConnectTimeoutSeconds = 10
+	}
+	if r.DNSCacheTTLSeconds == 0 {
+		r.DNSCacheTTLSeconds = 300
+	}
+	if r.BackupTargetHost != "" && r.BackupTargetPort == 0 {
+		r.BackupTargetPort = r.TargetPort
+	}
+	if r.TCPHealthIntervalSeconds > 0 && r.TCPHealthTimeoutSeconds == 0 {
+		r.TCPHealthTimeoutSeconds = 3
 	}
 	if r.TCPIdleTimeoutSeconds == 0 {
 		r.TCPIdleTimeoutSeconds = 300
@@ -560,6 +606,12 @@ func Validate(cfg Config) error {
 			return errors.New("admin token SHA-256 must contain exactly 64 hexadecimal characters")
 		}
 	}
+	if cfg.Web.MonitorTokenSHA != "" {
+		tokenHash, err := hex.DecodeString(cfg.Web.MonitorTokenSHA)
+		if err != nil || len(tokenHash) != sha256.Size {
+			return errors.New("monitor token SHA-256 must contain exactly 64 hexadecimal characters")
+		}
+	}
 	if _, err := NormalizeDNSServers(cfg.Web.DNSServers); err != nil {
 		return err
 	}
@@ -651,6 +703,7 @@ func validateRules(rules []Rule, limits ResourceLimits) error {
 	}
 
 	seenIDs := make(map[string]struct{}, len(rules))
+	healthEndpoints := 0
 	for i := range rules {
 		r := NormalizeRule(rules[i])
 		if r.ID == "" {
@@ -697,6 +750,41 @@ func validateRules(rules []Rule, limits ResourceLimits) error {
 		}
 		if len(r.TargetHost) > 253 {
 			return fmt.Errorf("rule %q target host may contain at most 253 bytes", r.ID)
+		}
+		if r.DNSCacheTTLSeconds < 1 || r.DNSCacheTTLSeconds > 3600 {
+			return fmt.Errorf("rule %q DNS cache validity must be 1-3600 seconds", r.ID)
+		}
+		if r.BackupTargetHost == "" {
+			if r.BackupTargetPort != 0 {
+				return fmt.Errorf("rule %q backup target port requires a backup host", r.ID)
+			}
+		} else {
+			if r.Protocol != ProtocolTCP || r.DataPlane != RuleDataPlaneGo {
+				return fmt.Errorf("rule %q backup target currently requires TCP and the Go data plane", r.ID)
+			}
+			if len(r.BackupTargetHost) > 253 || r.BackupTargetPort < 1 || r.BackupTargetPort+listenEnd-r.ListenPort > 65535 {
+				return fmt.Errorf("rule %q backup target host or port range is invalid", r.ID)
+			}
+			if address, parseErr := netip.ParseAddr(r.BackupTargetHost); parseErr == nil {
+				if err := ValidateTargetAddress(r, address); err != nil {
+					return fmt.Errorf("rule %q backup target: %w", r.ID, err)
+				}
+			}
+		}
+		if r.TCPHealthIntervalSeconds != 0 {
+			if r.Protocol != ProtocolTCP || r.DataPlane != RuleDataPlaneGo || r.TCPHealthIntervalSeconds < 5 || r.TCPHealthIntervalSeconds > 3600 || r.TCPHealthTimeoutSeconds < 1 || r.TCPHealthTimeoutSeconds > 30 {
+				return fmt.Errorf("rule %q TCP connect check requires Go TCP, interval 5-3600 seconds and timeout 1-30 seconds", r.ID)
+			}
+			families := 1
+			if r.ListenHost == "*" {
+				families = 2
+			}
+			healthEndpoints += (listenEnd - r.ListenPort + 1) * families
+			if healthEndpoints > 256 {
+				return errors.New("at most 256 Go TCP connect-check endpoints are permitted across all rules")
+			}
+		} else if r.TCPHealthTimeoutSeconds != 0 {
+			return fmt.Errorf("rule %q TCP health timeout requires a health interval", r.ID)
 		}
 		if r.ListenHost != "*" {
 			ip, err := netip.ParseAddr(r.ListenHost)

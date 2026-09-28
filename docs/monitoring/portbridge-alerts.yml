@@ -1,0 +1,35 @@
+groups:
+  - name: portbridge
+    rules:
+      - alert: PortBridgeScrapeUnavailable
+        expr: up{job="portbridge"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PortBridge metrics scrape unavailable / PortBridge 指标抓取不可用"
+          description: "Check HTTPS trust, the direct-source IP allowlist, monitoring token and service state. / 检查 HTTPS 信任、来源 IP 白名单、监控令牌和服务状态。"
+      - alert: PortBridgeTLSCertificateExpiring
+        expr: portbridge_tls_certificate_seconds_until_expiry{job="portbridge"} < 30 * 24 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PortBridge certificate expires within 30 days / 证书将在 30 天内到期"
+          description: "Validate and reload renewed material; clients must still verify trust and names. / 校验并重载续期证书，客户端仍需验证信任链和名称。"
+      - alert: PortBridgeRuleControlPlaneNotReady
+        expr: (portbridge_rule_running{job="portbridge"} == 0) and on(job, instance, rule_id, protocol) (portbridge_rule_desired_enabled{job="portbridge"} == 1)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Enabled PortBridge rule is not running / 已启用规则未运行"
+          description: "This is a manager/control-plane signal, not an end-to-end business-health result. / 这是管理器和控制面信号，不代表端到端业务健康。"
+      - alert: PortBridgeGoTCPConnectCheckFailed
+        expr: portbridge_go_tcp_connect_status{job="portbridge",status="unreachable"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Optional TCP connect checks failed / 可选 TCP 建连检查失败"
+          description: "A connect check only tests the TCP handshake; inspect application health independently. / 建连检查仅测试 TCP 握手，需独立检查应用健康。"

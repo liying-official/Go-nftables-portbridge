@@ -1,0 +1,76 @@
+{
+  "id": null,
+  "uid": "portbridge-ops",
+  "title": "PortBridge Operations / 运维概览",
+  "description": "Control-plane and best-effort traffic observations. Rule-running and TCP-connect checks are not end-to-end application health. / 控制面与尽力采集流量；运行标志和 TCP 建连检查均非端到端业务健康。",
+  "tags": ["portbridge"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {"list": [{"name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "query": "prometheus", "current": {}}]},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Certificate days left / 证书剩余天数",
+      "description": "Loaded management certificate only; client trust is not checked.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 6, "x": 0, "y": 0},
+      "targets": [{"expr": "portbridge_tls_certificate_seconds_until_expiry{job=\"portbridge\"} / 86400", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "d", "thresholds": {"mode": "absolute", "steps": [{"color": "red"}, {"color": "orange", "value": 7}, {"color": "green", "value": 30}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Enabled rules observed running / 已启用且运行的规则",
+      "description": "Manager control-plane observation, not application health.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 6, "x": 6, "y": 0},
+      "targets": [{"expr": "sum(portbridge_rule_running{job=\"portbridge\"} * on(job, instance, rule_id, protocol) portbridge_rule_desired_enabled{job=\"portbridge\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Go TCP connections / Go TCP 连接",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "sum(portbridge_go_active_tcp_connections{job=\"portbridge\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Go UDP sessions / Go UDP 会话",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "sum(portbridge_go_active_udp_sessions{job=\"portbridge\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Observed traffic by source / 按来源观测流量",
+      "description": "Go payload and nft L3 are different measurement scopes; never sum them as payload or billable traffic.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 7},
+      "targets": [
+        {"expr": "sum by (source, direction) (portbridge_rule_bytes_per_second{job=\"portbridge\"}) * 8", "legendFormat": "{{source}} {{direction}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "TCP backup use / TCP 备用目标使用",
+      "description": "Connections established via the backup; this is not a health verdict.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17},
+      "targets": [{"expr": "sum by (rule_id) (rate(portbridge_go_tcp_fallbacks_total{job=\"portbridge\"}[5m]))", "legendFormat": "{{rule_id}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "TCP connect-check failures / TCP 建连检查失败",
+      "description": "Optional TCP handshake checks only; UDP and application-layer health are not inferred.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17},
+      "targets": [{"expr": "portbridge_go_tcp_connect_status{job=\"portbridge\",status=\"unreachable\"}", "legendFormat": "{{rule_id}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    }
+  ]
+}

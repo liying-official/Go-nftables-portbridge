@@ -491,3 +491,36 @@ func TestTokenFileConsistency(t *testing.T) {
 		t.Fatal("rotated installation reports inconsistent token file")
 	}
 }
+
+func TestOptionalGoTCPBackendValidationAndProbeBudget(t *testing.T) {
+	cfg := Default()
+	rule := NormalizeRule(Rule{
+		ID: "go-tcp-backup", Name: "go-tcp-backup", Protocol: ProtocolTCP, DataPlane: RuleDataPlaneGo,
+		ListenHost: "127.0.0.1", ListenPort: 10000, TargetHost: "127.0.0.1", TargetPort: 20000,
+		BackupTargetHost: "127.0.0.1", TCPHealthIntervalSeconds: 5,
+		AllowPrivateTarget: true, TargetCIDRAllowlist: []string{"127.0.0.1/32"},
+	})
+	cfg.Rules = []Rule{rule}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("valid optional Go TCP backend rejected: %v", err)
+	}
+	bad := rule
+	bad.Protocol = ProtocolUDP
+	cfg.Rules = []Rule{bad}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("UDP unexpectedly accepted TCP backup/probe")
+	}
+	bad = rule
+	bad.AllowPrivateTarget = false
+	cfg.Rules = []Rule{bad}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("backup bypassed restricted-target authorization")
+	}
+	bad = rule
+	bad.ListenPortEnd = 10256
+	bad.TargetPortEnd = 20256
+	cfg.Rules = []Rule{bad}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("257 connect-check endpoints exceeded the global budget")
+	}
+}

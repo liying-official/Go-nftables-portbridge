@@ -99,6 +99,10 @@ func InspectTLS(web config.WebConfig) (CertificateStatus, error) {
 	if err != nil {
 		return CertificateStatus{}, err
 	}
+	return validateLoadedTLS(cfg)
+}
+
+func validateLoadedTLS(cfg *tls.Config) (CertificateStatus, error) {
 	status := certificateStatus(cfg)
 	if status.Enabled {
 		leaf := cfg.Certificates[0].Leaf

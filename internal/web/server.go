@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -33,18 +34,23 @@ var staticFS embed.FS
 const maxJSONBodyBytes = 1 << 20
 
 type Server struct {
-	store      *config.Store
-	acl        *acl.Manager
-	proxies    *proxy.Manager
-	logger     *slog.Logger
-	tokenFile  string
-	startedAt  time.Time
-	csrf       string
-	mu         sync.Mutex
-	servers    []*http.Server
-	listeners  []net.Listener
-	startupWeb *config.WebConfig
-	activeTLS  CertificateStatus
+	store          *config.Store
+	acl            *acl.Manager
+	proxies        *proxy.Manager
+	logger         *slog.Logger
+	tokenFile      string
+	startedAt      time.Time
+	csrf           string
+	mu             sync.Mutex
+	changeMu       sync.Mutex
+	operationMu    sync.Mutex
+	operations     map[string]ApplyOperation
+	operationOrder []string
+	servers        []*http.Server
+	listeners      []net.Listener
+	startupWeb     *config.WebConfig
+	activeTLS      CertificateStatus
+	activeCert     atomic.Pointer[tls.Certificate]
 
 	aclDenyLogUnix    atomic.Int64
 	aclDenySuppressed atomic.Uint64
@@ -76,11 +82,22 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
+	status := certificateStatus(tlsConfig)
 	s.mu.Lock()
 	s.startupWeb = &cfg.Web
-	s.activeTLS = certificateStatus(tlsConfig)
+	s.activeTLS = status
 	s.mu.Unlock()
-	if status := certificateStatus(tlsConfig); status.SelfSigned {
+	if tlsConfig != nil {
+		certificate := tlsConfig.Certificates[0]
+		s.activeCert.Store(&certificate)
+		tlsConfig.Certificates = nil
+		tlsConfig.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return s.activeCert.Load(), nil
+		}
+	} else {
+		s.activeCert.Store(nil)
+	}
+	if status.SelfSigned {
 		s.logger.Warn("self-signed HTTPS certificate in use; verify its fingerprint through a trusted channel before trusting it, or replace it with your own certificate", "sha256", status.SHA256, "not_after", status.NotAfter)
 	}
 	handler := s.routes()
@@ -169,12 +186,21 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /static/style.css", s.serveStatic("static/style.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /static/security.css", s.serveStatic("static/security.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /api/bootstrap", s.requireAuth(s.handleBootstrap))
-	mux.HandleFunc("GET /api/status", s.requireAuth(s.handleStatus))
-	mux.HandleFunc("GET /metrics", s.requireAuth(s.handleMetrics))
+	mux.HandleFunc("GET /api/status", s.requireReadAuth(s.handleStatus))
+	mux.HandleFunc("GET /api/operations/latest", s.requireReadAuth(s.handleLatestOperation))
+	mux.HandleFunc("GET /api/operations/{id}", s.requireReadAuth(s.handleOperation))
+	mux.HandleFunc("GET /metrics", s.requireReadAuth(s.handleMetrics))
 	mux.HandleFunc("GET /api/config", s.requireAuth(s.handleGetConfig))
 	mux.HandleFunc("PUT /api/settings", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleSettings))))
 	mux.HandleFunc("POST /api/token/rotate", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleRotateToken))))
+	mux.HandleFunc("POST /api/monitor-token/rotate", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleRotateMonitorToken))))
+	mux.HandleFunc("DELETE /api/monitor-token", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleRevokeMonitorToken))))
+	mux.HandleFunc("POST /api/tls/reload", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleReloadTLS))))
 	mux.HandleFunc("POST /api/rules", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleCreateRule))))
+	mux.HandleFunc("POST /api/rules/validate", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleValidateRules))))
+	mux.HandleFunc("POST /api/rules/preview", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handlePreviewRules))))
+	mux.HandleFunc("GET /api/rules/template", s.requireAuth(s.handleExportRuleTemplate))
+	mux.HandleFunc("PUT /api/rules", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleReplaceRules))))
 	mux.HandleFunc("PUT /api/rules/{id}", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleUpdateRule))))
 	mux.HandleFunc("DELETE /api/rules/{id}", s.requireAuth(s.requireBrowserSameOrigin(s.requireCSRF(s.handleDeleteRule))))
 	return s.securityHeaders(s.accessControl(mux))
@@ -256,11 +282,20 @@ func (s *Server) logACLDenied(remote string) {
 }
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireToken(next, false)
+}
+
+func (s *Server) requireReadAuth(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireToken(next, true)
+}
+
+func (s *Server) requireToken(next http.HandlerFunc, allowMonitor bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.initializeSecurityControls()
 		ip, _ := remoteIP(r.RemoteAddr)
 		token, parsed := bearerToken(r.Header.Values("Authorization"))
-		if parsed && s.validToken(token) {
+		adminHash, monitorHash := s.store.TokenHashes()
+		if parsed && (tokenMatchesHash(token, adminHash) || allowMonitor && tokenMatchesHash(token, monitorHash)) {
 			s.authFailures.reset(ip)
 			next(w, r)
 			return
@@ -270,7 +305,11 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="PortBridge"`)
-		writeFixedAPIError(w, http.StatusUnauthorized, "apiInvalidToken", "管理员令牌无效")
+		if allowMonitor {
+			writeFixedAPIError(w, http.StatusUnauthorized, "apiInvalidReadToken", "令牌无效")
+		} else {
+			writeFixedAPIError(w, http.StatusUnauthorized, "apiInvalidToken", "管理员令牌无效")
+		}
 	}
 }
 
@@ -336,10 +375,20 @@ func (s *Server) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) validToken(token string) bool {
+	admin, _ := s.store.TokenHashes()
+	return tokenMatchesHash(token, admin)
+}
+
+func (s *Server) validMonitorToken(token string) bool {
+	_, monitor := s.store.TokenHashes()
+	return tokenMatchesHash(token, monitor)
+}
+
+func tokenMatchesHash(token, hash string) bool {
 	if len(token) != 64 {
 		return false
 	}
-	expected, err := hex.DecodeString(s.store.Get().Web.AdminTokenSHA)
+	expected, err := hex.DecodeString(hash)
 	if err != nil || len(expected) != sha256.Size {
 		return false
 	}
@@ -353,9 +402,15 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.acl.Snapshot()
+	op, hasOperation := s.latestOperation()
+	var latest any
+	if hasOperation {
+		latest = op
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"uptime_seconds": int64(time.Since(s.startedAt).Seconds()),
-		"rules":          s.proxies.Runtime(),
+		"uptime_seconds":   int64(time.Since(s.startedAt).Seconds()),
+		"rules":            s.proxies.Runtime(),
+		"latest_operation": latest,
 		"acl": map[string]any{
 			"auto":      prefixesToStrings(snap.Auto),
 			"whitelist": prefixesToStrings(snap.Whitelist),
@@ -366,11 +421,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	cfg := s.store.Get()
+	cfg, revision := s.store.GetWithRevision()
 	s.mu.Lock()
 	activeTLS := s.activeTLS
 	s.mu.Unlock()
+	w.Header().Set("ETag", `"`+revision+`"`)
 	writeJSON(w, http.StatusOK, map[string]any{
+		"config_revision": revision,
 		"web": map[string]any{
 			"port":                cfg.Web.Port,
 			"listen_ipv4":         cfg.Web.ListenIPv4,
@@ -384,8 +441,9 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			"tls_min_version":     cfg.Web.TLSMinVersion,
 			"dns_servers":         cfg.Web.DNSServers,
 		},
-		"rules": cfg.Rules,
-		"https": map[string]any{"required": cfg.Web.RequireHTTPS, "certificate": activeTLS},
+		"rules":                    cfg.Rules,
+		"https":                    map[string]any{"required": cfg.Web.RequireHTTPS, "certificate": activeTLS},
+		"monitor_token_configured": cfg.Web.MonitorTokenSHA != "",
 	})
 }
 
@@ -445,8 +503,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	expected, err := requestedRevision(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
 	old := s.store.Get()
-	cfg, err := s.store.Update(func(c *config.Config) error {
+	cfg, err := s.store.UpdateIfRevision(expected, func(c *config.Config) error {
 		c.Web.AutoLANACL = req.AutoLANACL
 		c.Web.StrictIPAllowlist = req.StrictIPAllowlist
 		c.Web.AllowInsecureHTTP = req.AllowInsecureHTTP
@@ -465,6 +530,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, config.ErrRevisionConflict) {
+			writeFixedAPIError(w, http.StatusPreconditionFailed, "apiRevisionConflict", "配置版本已改变，请重新读取后重试")
+			return
+		}
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -484,7 +553,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	restartRequired := active.Port != cfg.Web.Port || active.ListenIPv4 != cfg.Web.ListenIPv4 || active.ListenIPv6 != cfg.Web.ListenIPv6 || active.TLSCertFile != cfg.Web.TLSCertFile || active.TLSKeyFile != cfg.Web.TLSKeyFile || effectiveTLSMinVersion(active.TLSMinVersion) != effectiveTLSMinVersion(cfg.Web.TLSMinVersion) || active.AllowInsecureHTTP != cfg.Web.AllowInsecureHTTP
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart_required": restartRequired})
+	revision := config.Revision(cfg)
+	w.Header().Set("ETag", `"`+revision+`"`)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart_required": restartRequired, "config_revision": revision})
 }
 
 func effectiveTLSMinVersion(version string) string {
@@ -495,12 +566,35 @@ func effectiveTLSMinVersion(version string) string {
 }
 
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
 	token, err := s.store.RotateAdminToken(s.tokenFile)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token})
+}
+
+func (s *Server) handleRotateMonitorToken(w http.ResponseWriter, r *http.Request) {
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
+	token, err := s.store.RotateMonitorToken()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"token": token})
+}
+
+func (s *Server) handleRevokeMonitorToken(w http.ResponseWriter, r *http.Request) {
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
+	if err := s.store.RevokeMonitorToken(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
@@ -516,15 +610,32 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.ID = id
 	rule = config.NormalizeRule(rule)
-	cfg, err := s.store.Update(func(c *config.Config) error {
-		c.Rules = append(c.Rules, rule)
-		return nil
-	})
+	expected, err := requestedRevision(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.proxies.Apply(cfg.Rules)
+	opID, err := randomHex(16)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
+	cfg, err := s.store.UpdateIfRevision(expected, func(c *config.Config) error {
+		c.Rules = append(c.Rules, rule)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, config.ErrRevisionConflict) {
+			writeFixedAPIError(w, http.StatusPreconditionFailed, "apiRevisionConflict", "配置版本已改变，请重新读取后重试")
+			return
+		}
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	op := s.applyRuleOperation(s.newApplyOperation(opID, cfg, []string{rule.ID}), cfg)
+	writeOperationHeaders(w, op)
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -537,8 +648,20 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.ID = id
 	rule = config.NormalizeRule(rule)
+	expected, err := requestedRevision(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	opID, err := randomHex(16)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
 	found := false
-	cfg, err := s.store.Update(func(c *config.Config) error {
+	cfg, err := s.store.UpdateIfRevision(expected, func(c *config.Config) error {
 		for i := range c.Rules {
 			if c.Rules[i].ID == id {
 				c.Rules[i] = rule
@@ -549,6 +672,10 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		return fmt.Errorf("rule %q not found", id)
 	})
 	if err != nil {
+		if errors.Is(err, config.ErrRevisionConflict) {
+			writeFixedAPIError(w, http.StatusPreconditionFailed, "apiRevisionConflict", "配置版本已改变，请重新读取后重试")
+			return
+		}
 		status := http.StatusBadRequest
 		if !found {
 			status = http.StatusNotFound
@@ -560,14 +687,27 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	s.proxies.Apply(cfg.Rules)
+	op := s.applyRuleOperation(s.newApplyOperation(opID, cfg, []string{id}), cfg)
+	writeOperationHeaders(w, op)
 	writeJSON(w, http.StatusOK, rule)
 }
 
 func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	expected, err := requestedRevision(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	opID, err := randomHex(16)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
 	found := false
-	cfg, err := s.store.Update(func(c *config.Config) error {
+	cfg, err := s.store.UpdateIfRevision(expected, func(c *config.Config) error {
 		out := c.Rules[:0]
 		for _, rule := range c.Rules {
 			if rule.ID == id {
@@ -583,6 +723,10 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, config.ErrRevisionConflict) {
+			writeFixedAPIError(w, http.StatusPreconditionFailed, "apiRevisionConflict", "配置版本已改变，请重新读取后重试")
+			return
+		}
 		status := http.StatusBadRequest
 		if !found {
 			status = http.StatusNotFound
@@ -594,7 +738,8 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	s.proxies.Apply(cfg.Rules)
+	op := s.applyRuleOperation(s.newApplyOperation(opID, cfg, []string{id}), cfg)
+	writeOperationHeaders(w, op)
 	w.WriteHeader(http.StatusNoContent)
 }
 

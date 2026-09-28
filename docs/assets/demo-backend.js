@@ -17,12 +17,12 @@
     {id:'demo-dual',name:'DEMO · Dual stack',protocol:'both',data_plane:'nftables',listen_host:'*',listen_port:10080,target_host:'2001:db8::20',target_port:8080,enabled:true},
     {id:'demo-range',name:'DEMO · Port range',protocol:'both',data_plane:'go',listen_host:'127.0.0.1',listen_port:20000,listen_port_end:20009,target_host:'203.0.113.40',target_port:30000,target_port_end:30009,enabled:false}
   ];
-  let rules, web, counters, lastSample, started, sequence;
+  let rules, web, counters, lastSample, started, sequence, monitorTokenConfigured;
   function reset() {
     rules=initial.map(rule=>({...copy(defaults),...rule}));
     web={port:9080,listen_ipv4:'127.0.0.1',listen_ipv6:'::1',auto_lan_acl:false,strict_ip_allowlist:true,allow_insecure_http:false,
       whitelist:['192.0.2.10/32'],tls_cert_file:'/demo/tls/fullchain.pem',tls_key_file:'/demo/tls/privkey.pem',tls_min_version:'1.3',dns_servers:[]};
-    counters=new Map();started=performance.now();lastSample=started;sequence=0;
+    counters=new Map();started=performance.now();lastSample=started;sequence=0;monitorTokenConfigured=false;
   }
   function plane(rule) {return !rule.enabled?'disabled':rule.data_plane==='go'?'go-proxy':rule.listen_host==='*'?'hybrid':'nftables';}
   function series(up,down,rateUp,rateDown,now,enabled) {
@@ -68,9 +68,12 @@
     let body;
     if(options.body!==undefined){try{body=JSON.parse(options.body);}catch{return fail(400,'demoInvalidRequest');}}
     if(method==='GET'&&path==='/api/bootstrap')return response(200,{csrf,name:'PortBridge static demo'});
-    if(method==='GET'&&path==='/api/config')return response(200,{web:copy(web),rules:copy(rules),https:{required:true,certificate:{enabled:true,self_signed:false,sha256:'0123456789abcdef'.repeat(4),not_after:'2036-01-01T00:00:00Z'}}});
+    if(method==='GET'&&path==='/api/config')return response(200,{web:copy(web),rules:copy(rules),monitor_token_configured:monitorTokenConfigured,https:{required:true,certificate:{enabled:true,self_signed:false,sha256:'0123456789abcdef'.repeat(4),not_after:'2036-01-01T00:00:00Z'}}});
     if(method==='GET'&&path==='/api/status')return response(200,status());
     if(method==='POST'&&path==='/api/token/rotate')return response(200,{token:password});
+    if(method==='POST'&&path==='/api/monitor-token/rotate'){monitorTokenConfigured=true;return response(200,{token:password});}
+    if(method==='DELETE'&&path==='/api/monitor-token'){monitorTokenConfigured=false;return response(204);}
+    if(method==='POST'&&path==='/api/tls/reload')return response(200,{reloaded:true});
     if(method==='PUT'&&path==='/api/settings'){
       if(!body||!port(body.port)||!['1.2','1.3'].includes(body.tls_min_version)||!body.tls_cert_file||!body.tls_key_file||
          !Array.isArray(body.whitelist)||!Array.isArray(body.dns_servers)||body.allow_insecure_http||

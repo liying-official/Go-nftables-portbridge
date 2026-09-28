@@ -41,11 +41,29 @@ assert.equal((await call('/api/settings','PUT',{...config.web,port:0})).status,4
 assert.equal((await call('/api/settings','PUT',{...config.web,port:9443})).status,200);
 assert.equal((await call('/api/config')).data.web.port,9443);
 assert.equal((await call('/api/token/rotate','POST')).data.token,'PortBridge');
+assert.equal((await call('/api/monitor-token/rotate','POST')).data.token,'PortBridge');
+assert.equal((await call('/api/config')).data.monitor_token_configured,true);
+assert.equal((await call('/api/monitor-token','DELETE')).status,204);
+assert.equal((await call('/api/config')).data.monitor_token_configured,false);
+assert.equal((await call('/api/tls/reload','POST')).data.reloaded,true);
 assert.equal((await call('https://untrusted.example/api/config')).status,404);
 assert.equal((await call('/metrics')).status,404);
 demo.reset();assert.equal((await call('/api/config')).data.web.port,9080);
 assert.equal((await call('/api/config')).data.rules.length,4);assert.equal(networkCalls,0);
 const html=fs.readFileSync(path.join(root,'docs/index.html'),'utf8');
+const productionHtml=fs.readFileSync(path.join(root,'internal/web/static/index.html'),'utf8');
+const productionApp=fs.readFileSync(path.join(root,'internal/web/static/app.js'),'utf8');
+for(const match of productionApp.matchAll(/\$\('([A-Za-z0-9_-]+)'\)/g)){
+  assert(productionHtml.includes(`id="${match[1]}"`),`production UI missing #${match[1]}`);
+  assert(html.includes(`id="${match[1]}"`),`demo UI missing #${match[1]}`);
+}
+for(const [page,script] of [[productionHtml,'internal/web/static/i18n.js'],[html,'docs/assets/ui/i18n.js']]){
+  const i18nContext=vm.createContext({window:{},location:{search:''},document:{documentElement:{dataset:{defaultLanguage:'en-US'}},querySelectorAll:()=>[]},localStorage:{getItem:()=>null},CustomEvent,URLSearchParams});
+  vm.runInContext(fs.readFileSync(path.join(root,script),'utf8'),i18nContext);
+  for(const match of page.matchAll(/data-i18n(?:-placeholder|-aria|-title)?="([A-Za-z0-9]+)"/g)){
+    assert(i18nContext.window.PB_I18N.hasMessageKey(match[1]),`UI text missing bilingual translation: ${match[1]}`);
+  }
+}
 assert(html.includes("connect-src 'none'"));assert(html.includes("form-action 'none'"));
 assert(!html.includes('="/static/'));
 for(const match of html.matchAll(/(?:src|href)="(assets\/[^"#]+)(?:#[^"]*)?"/g))assert(fs.existsSync(path.join(root,'docs',match[1])),match[1]);

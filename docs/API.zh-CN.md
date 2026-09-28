@@ -9,7 +9,7 @@
 **语言：** [English](API.en-US.md) | **简体中文**  
 
 > [!IMPORTANT]
-> 所有管理 API 都要求管理员 Bearer Token。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
+> 读取配置与管理写操作要求管理员 Bearer Token；独立监控令牌只能读取状态、应用操作状态和指标。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
 
 本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.5.0 实现为准。
 
@@ -34,13 +34,14 @@
 - [15. 并发、重试与运维边界](#15-并发重试与运维边界)
 - [16. 当前 API 不提供的能力](#16-当前-api-不提供的能力)
 - [17. Prometheus 指标](#17-prometheus-指标)
+- [18. 监控凭据与配置操作](#18-监控凭据与配置操作)
 - [实现依据与源码链接](#实现依据与源码链接)
 
 ---
 
 ## 1. 接口范围与速查
 
-当前版本显式注册 **8 个 JSON 管理 API 路由**，统一以 `/api/` 开头；另提供受保护的 `GET /metrics` Prometheus 接口，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
+当前版本显式注册 **17 个 JSON 管理 API 路由**，统一以 `/api/` 开头；另提供受保护的 `GET /metrics` Prometheus 接口，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
 
 | 方法 | 路径 | 作用 | 成功状态 | CSRF | 请求 JSON |
 |---|---|---|---:|---|---|
@@ -52,8 +53,14 @@
 | `POST` | `/api/rules` | 创建一条规则 | `201` | 必须 | `Rule` |
 | `PUT` | `/api/rules/{id}` | 完整替换一条已有规则 | `200` | 必须 | `Rule` |
 | `DELETE` | `/api/rules/{id}` | 删除持久配置中的一条规则并请求撤销 | `204` | 必须 | 无 |
+| `GET` | `/api/operations/latest`、`/api/operations/{id}` | 读取进程内应用状态 | `200` | 不需要 | 无 |
+| `POST` / `DELETE` | `/api/monitor-token/rotate`、`/api/monitor-token` | 轮换或撤销监控令牌 | `200` / `204` | 必须 | 无 |
+| `POST` | `/api/tls/reload` | 校验并为新 TLS 握手重载证书 | `200` | 必须 | 无 |
+| `POST` | `/api/rules/validate`、`/api/rules/preview` | 仅校验或预览完整规则集，不保存 | `200` | 必须 | `{ "rules": [...] }` |
+| `PUT` | `/api/rules` | 原子保存完整规则集，然后应用 | `200` | 必须 | `{ "rules": [...] }` |
+| `GET` | `/api/rules/template` | 导出不含实例 ID 和凭据的可迁移规则模板 | `200` | 不需要 | 无 |
 
-**所有上述 API 均要求管理员 Bearer Token。** `/api/bootstrap` 不是匿名登录接口。当前没有用户账号、角色、只读令牌或按规则授权，持有有效管理员令牌即可执行这些管理操作。[^auth]
+全部路由都要求 Bearer Token。只有 `/api/status`、`/api/operations/latest`、`/api/operations/{id}` 和 `/metrics` 接受独立只读监控令牌；其余路由要求管理员令牌。`/api/bootstrap` 不是匿名接口。当前没有用户账号、通用角色或按规则授权。[^auth]
 
 需要读取规则列表时，使用 `/api/config` 的 `rules`，或 `/api/status` 的 `rules[].rule`。当前**没有** `GET /api/rules` 或 `GET /api/rules/{id}`；未注册的读取路径返回 `404`，不要根据 POST 路径自行推导读取接口。[^routes]
 
@@ -87,7 +94,7 @@ https://[::1]:9080
 
 自签名证书需要先经可信渠道核对指纹，再在客户端建立信任；本文示例使用 `--cacert` 或 Python 的可信 CA 文件，不以跳过证书验证作为接入方式。证书主机名/IP 也必须覆盖请求地址。`self_signed:false` 本身不是客户端信任链验证成功的证明。[^tls][^deployment]
 
-**证书有效期边界：** HTTPS 准备、`--check-https` 和设置校验会拒绝过期或尚未生效的证书；监听器的 TLS 加载器本身不执行这项日期拒绝，也不自动续期。进程可能持续运行到证书过期之后，应监控到期时间，并由客户端验证信任链、名称和时间；更新材料后重启。`https.certificate.enabled` 不能证明客户端信任或当前仍在有效期。
+**证书有效期边界：** HTTPS 准备、`--check-https`、设置校验与手动重载会拒绝过期或尚未生效的证书。不会自动续期；进程可能持续运行到证书过期之后。应监控到期时间，更换服务器本地材料后执行鉴权重载或重启；客户端仍须验证信任链、名称和时间。`https.certificate.enabled` 不能证明客户端信任或当前仍在有效期。
 
 ### 2.2 管理 IP ACL：先于 Token 生效
 
@@ -97,7 +104,7 @@ ACL 根据 TCP 直接对端地址判断，不读取 `X-Forwarded-For`、`X-Real-
 
 `auto_lan_acl=true` 探测的是本机处于启用状态的接口上直接连接的私有/链路本地前缀，不是无条件开放所有私网地址。管理白名单最多 **1024 个规范化去重后的条目**。严格模式拒绝 `/0`；普通模式默认也拒绝 `/0`，其本地风险开关不通过 API 暴露。[^acl][^config-validation]
 
-### 2.3 管理员令牌
+### 2.3 Bearer 令牌
 
 每个请求使用一个 Authorization 头：
 
@@ -105,7 +112,7 @@ ACL 根据 TCP 直接对端地址判断，不读取 `X-Forwarded-For`、`X-Real-
 Authorization: Bearer <64-character-admin-token>
 ```
 
-程序生成的令牌来自 32 字节随机数据，以 64 个十六进制字符编码。服务器保存并比对的是令牌字符串的 SHA-256；不要把 `admin_token_sha256` 的哈希值当作令牌发送。[^token-storage]
+程序生成的管理员与监控令牌均来自 32 字节随机数据，以 64 个十六进制字符编码。服务器保存并比对令牌字符串的 SHA-256；不要把任一种哈希值当作令牌发送。监控令牌仅能访问第 18 节列出的四个读取接口。[^token-storage]
 
 | 项目 | 当前行为 |
 |---|---|
@@ -203,7 +210,7 @@ Content-Type: application/json; charset=utf-8
 Cache-Control: no-store
 ```
 
-响应没有统一的 `data` 包装层：创建/更新直接返回 Rule，删除返回空体，设置返回 `{ "ok": true, "restart_required": ... }`，其余见各接口。字段排列顺序不是协议的一部分。[^json]
+响应没有统一的 `data` 包装层：创建/更新直接返回 Rule，删除返回空体，设置响应包含 `ok`、`restart_required` 和 `config_revision`，其余见各接口。字段排列顺序不是协议的一部分。[^json]
 
 未知路径、方法不匹配、HTTP ACL 拒绝和传输层错误未必是 JSON。客户端应先检查状态码与 Content-Type，再决定是否 JSON 解码；尤其不能对 `204` 调用 JSON 解码。[^routes][^headers]
 
@@ -264,6 +271,7 @@ Authorization: Bearer <admin-token>
 
 ```json
 {
+  "config_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "web": {
     "port": 9080,
     "listen_ipv4": "127.0.0.1",
@@ -278,6 +286,7 @@ Authorization: Bearer <admin-token>
     "dns_servers": []
   },
   "rules": [],
+  "monitor_token_configured": false,
   "https": {
     "required": true,
     "certificate": {
@@ -292,8 +301,10 @@ Authorization: Bearer <admin-token>
 
 | 顶层字段 | 类型 | 说明 |
 |---|---|---|
+| `config_revision` | string | 已保存配置的不透明修订值；同时作为带双引号的 `ETag` 返回 |
 | `web` | object | 第 7 节列出的 11 个管理设置字段，值来自保存后的配置 |
 | `rules` | Rule[] | 持久配置中的规则列表，保留配置顺序；不包含运行态清理记录 |
+| `monitor_token_configured` | boolean | 是否配置独立监控令牌；不会暴露明文或哈希 |
 | `https` | object | 强制 HTTPS 策略与当前已加载证书信息 |
 
 `https` 结构：
@@ -301,14 +312,14 @@ Authorization: Bearer <admin-token>
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `required` | boolean | 配置中的 `web.require_https`，只读暴露，不是 settingsRequest 字段 |
-| `certificate.enabled` | boolean | 启动时记录的原生 TLS 证书是否启用 |
+| `certificate.enabled` | boolean | 当前是否已加载原生 TLS 证书 |
 | `certificate.self_signed` | boolean | 已加载叶证书是否满足源码中的自签名判定，不代表信任验证结论 |
 | `certificate.sha256` | string，可省略 | 已加载叶证书原始 DER 的 SHA-256，64 位小写十六进制，无冒号 |
 | `certificate.not_after` | string | 已加载证书过期时间；无 TLS 时可能出现零值时间 |
 
-**保存配置和运行实例是两个时间点。** 更改 TLS 路径但尚未重启时，`web.tls_cert_file`/`tls_key_file` 可显示新路径，而 `https.certificate` 仍描述旧的已加载证书。仅替换同一路径下的文件也不会自动热加载证书。[^tls][^settings]
+**保存配置和运行实例是两个时间点。** 更改 TLS 路径但尚未成功重载或重启时，`web.tls_cert_file`/`tls_key_file` 可显示新路径，而 `https.certificate` 仍描述旧的已加载证书。仅替换同一路径下的文件也需显式重载或重启。[^tls][^settings]
 
-此响应不是原始 `config.json`：不返回 `version`、`resource_limits`、`nftables`、`admin_token_sha256`、`allow_unsafe_all_address_acl`，也不会返回证书/私钥文件内容。不要把整个响应当作配置文件备份或原样提交给 `/api/settings`。只提取 `.web` 才与当前设置请求模型匹配。[^read-handlers][^config-model]
+此响应不是原始 `config.json`：不返回 `version`、`resource_limits`、`nftables`、`admin_token_sha256`、`monitor_token_sha256`、`allow_unsafe_all_address_acl`，也不会返回证书/私钥文件内容。不要把整个响应当作配置文件备份或原样提交给 `/api/settings`。只提取 `.web` 才与当前设置请求模型匹配。[^read-handlers][^config-model]
 
 ## 6. 获取运行状态：`GET /api/status`
 
@@ -320,6 +331,7 @@ Authorization: Bearer <admin-token>
 {
   "uptime_seconds": 120,
   "rules": [],
+  "latest_operation": null,
   "acl": {
     "auto": ["127.0.0.0/8", "::1/128"],
     "whitelist": [],
@@ -333,6 +345,7 @@ Authorization: Bearer <admin-token>
 |---|---|---|
 | `uptime_seconds` | integer/int64 | 自 Web Server 对象创建后的运行秒数，截断为整数；不是操作系统启动时间 |
 | `rules` | RuleRuntime[] | 运行态规则，结构详见第 11 节；按规则名、再按 ID 排序 |
+| `latest_operation` | ApplyOperation 或 null | 进程内最近一次配置应用观察；尚无规则写操作时为 null |
 | `acl.auto` | string[] | 当前有效自动允许前缀，始终含回环；关闭自动 LAN 不会删除回环 |
 | `acl.whitelist` | string[] | 当前生效的持久管理白名单 |
 | `acl.bootstrap` | string[] | 当前生效的临时启动白名单；严格模式下为空 |
@@ -357,8 +370,8 @@ Authorization: Bearer <admin-token>
 | `strict_ip_allowlist` | boolean | 严格管理白名单；要求当前请求已经使用原生 HTTPS | 立即刷新 ACL |
 | `allow_insecure_http` | boolean | 非回环明文 HTTP 的显式风险确认；`require_https=true` 时不能设为 true | 改变该值计入重启判断 |
 | `whitelist` | string[] | IP 或 CIDR，规范化后去重排序，最多 1024 项 | 立即刷新 ACL |
-| `tls_cert_file` | string | 服务器上证书文件的绝对路径，与私钥同时配置 | 重启 |
-| `tls_key_file` | string | 服务器上私钥文件的绝对路径，与证书同时配置 | 重启 |
+| `tls_cert_file` | string | 服务器上证书文件的绝对路径，与私钥同时配置 | 校验后手动重载或重启 |
+| `tls_key_file` | string | 服务器上私钥文件的绝对路径，与证书同时配置 | 校验后手动重载或重启 |
 | `tls_min_version` | string | `"1.2"` / `"1.3"`；省略或空字符串保留原策略 | 有效策略变化时重启 |
 | `dns_servers` | string[] | 最多 8 个去重后的 DNS 服务器；空列表使用系统解析器 | 更新解析器并重新应用期望规则 |
 
@@ -389,13 +402,14 @@ Authorization: Bearer <admin-token>
 ```json
 {
   "ok": true,
-  "restart_required": true
+  "restart_required": true,
+  "config_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 ```
 
-`restart_required` 比较的是保存后的配置与运行监听器**启动时**配置，而非与上一次保存的配置比较。重复保存同一个尚未应用的变更仍会返回 true；还原为当前运行值后可以返回 false。严格 ACL、自动 LAN、白名单本身的修改不要求重启。[^settings]
+`restart_required` 比较的是保存后的配置与当前监听策略（启动时取得；成功显式重载后更新证书路径），而非与上一次保存的配置比较。重复保存同一个尚未应用的变更仍会返回 true；还原为当前运行值后可以返回 false。严格 ACL、自动 LAN、白名单本身的修改不要求重启。[^settings]
 
-同一路径的证书文件内容变了但路径没变时，该比较不检查文件内容，不能依赖 `restart_required` 发现这种更新。当前 API 也没有独立的“查询待重启状态”或“重启服务”接口。[^settings][^routes]
+同一路径的证书文件内容变了但路径没变时，该比较不检查文件内容，不能依赖 `restart_required` 发现这种更新。通过 `POST /api/tls/reload` 校验并将新证书用于后续握手。监听地址、端口和最低 TLS 策略变化仍需重启；API 没有远程重启服务接口。[^settings][^routes]
 
 ### 7.3 严格白名单的附加检查
 
@@ -555,7 +569,7 @@ HTTP/1.1 204 No Content
 
 ## 10. Rule 完整字段与校验规则
 
-Rule 结构定义 **27 个可能的 JSON 字段**，并不保证每份响应都输出 27 项；`omitempty` 规则见第 10.7 节。下列“默认”指 API 创建/替换时经过 `NormalizeRule` 的结果，不代表 WebGUI 表单的默认选项；其中 `protocol` 在 API 中没有默认，`enabled` 省略则为 false。[^config-model][^normalize-rule]
+Rule 结构定义 **32 个可能的 JSON 字段**，并不保证每份响应都输出 32 项；`omitempty` 规则见第 10.7 节。下列“默认”指 API 创建/替换时经过 `NormalizeRule` 的结果，不代表 WebGUI 表单的默认选项；其中 `protocol` 在 API 中没有默认，`enabled` 省略则为 false。[^config-model][^normalize-rule]
 
 ### 10.1 身份、协议与目标
 
@@ -571,11 +585,18 @@ Rule 结构定义 **27 个可能的 JSON 字段**，并不保证每份响应都�
 | `target_host` | string | 必需 | 去空白后非空，最多 253 字节；IP literal 或供解析器处理的主机名，不是 URL |
 | `target_port` | integer | 必需 | `1–65535` |
 | `target_port_end` | integer | `0`（单端口） | 与监听区间长度相同，结束值不小于起始值 |
+| `backup_target_host` | string | 空（关闭） | 可选 Go TCP 备用目标域名/IP；应用前解析并校验授权；nft 和 UDP 路径不支持 |
+| `backup_target_port` | integer | 配置备用主机时默认使用主目标端口 | 备用端口范围须在 1–65535 内，与监听范围宽度一致 |
+| `dns_cache_ttl_seconds` | integer | 300 | 1–3600 秒；周期 DNS 失败后只在有效期内复用已解析且重新授权的地址 |
+| `tcp_health_interval_seconds` | integer | 0（关闭） | 可选 Go TCP 建连检查，5–3600 秒；不是应用层健康；全部规则最多 256 个检查端点 |
+| `tcp_health_timeout_seconds` | integer | 启用检查时默认 3 | 1–30 秒；必须配置检查间隔 |
 | `enabled` | boolean | `false` | 管理员期望的启用状态，不是运行态反馈 |
 | `allow_private_target` | boolean | `false` | 显式允许经过 CIDR 白名单约束的受限目标 |
 | `target_cidr_allowlist` | string[] | 空 | 必须使用 CIDR，最多 64 个规范化去重后的条目；不接受裸 IP 或 `/0` |
 
 `listen_host`/`target_host` 会去掉外围方括号，例如 `[::1]` → `::1`；字段本身不应带端口。主机名的外部 DNS 解析不在配置的字面 IP 校验阶段完成，不能把“保存通过”理解为“域名已可达”。[^normalize-rule][^config-validation][^plan]
+
+可选 Go TCP 备用目标在主目标拨号失败后尝试；若可选建连检查当前只报告备用目标可达，则先尝试备用，失败后再尝试主目标。这些仅是 TCP 握手观察，不是应用层健康。规划阶段 DNS 解析与目标授权仍须通过，备用目标不能用于绕过主目标 DNS 失败或授权拒绝。
 
 ### 10.2 TCP、UDP 通用及连接预算
 
@@ -678,6 +699,11 @@ target_count = (target_port_end == 0 ? target_port : target_port_end) - target_p
 data_plane
 listen_port_end
 target_port_end
+backup_target_host
+backup_target_port
+dns_cache_ttl_seconds
+tcp_health_interval_seconds
+tcp_health_timeout_seconds
 udp_workers
 udp_batch_size
 udp_packet_buffer_size
@@ -702,6 +728,7 @@ target_cidr_allowlist
 | `traffic` | TrafficSnapshot | 每秒后台采样的 Go、nft 尽力统计、hook counter、每规则实时速率及有效性标志；见[第 11.5 节](#115-trafficsnapshot-与采样有效性)和[统计说明](MONITORING.zh-CN.md) |
 | `data_plane` | string | 运行/风险视角的数据面标签，与 `rule.data_plane` 是不同字段 |
 | `go_running` | boolean | 该逻辑规则是否至少存在一个已登记的 Go runner；不是所有派生入口逐一健康证明 |
+| `backend_connectivity` | object | 可选 Go TCP 建连检查结果：`check_type:"tcp_connect"`，状态为 `not_checked`、`warming_up`、`primary_reachable`、`backup_reachable` 或 `unreachable`，可附 `checked_at`；不是应用层健康 |
 | `kernel_state` | string | 管理器对内核状态证据的分类，见下表 |
 
 运行态 `data_plane`：
@@ -745,6 +772,7 @@ target_cidr_allowlist
 | `total_tcp` | integer/uint64 | 累计通过 Go 连接预算的 TCP 接入数；上游拨号随后失败也可能已计数 |
 | `total_udp_sessions` | integer/uint64 | 累计创建的 Go UDP 会话数；不是唯一客户端 IP 数 |
 | `tcp_rejected` | integer/uint64 | Go TCP 来源识别/资源预算拒绝数；不是全部网络连接错误 |
+| `tcp_fallbacks` | integer/uint64 | 经配置的备用目标成功建立的 Go TCP 连接数；不表示应用健康 |
 | `bytes_up` | integer/uint64 | 客户端 → 目标的 Go 代理有效载荷累计字节 |
 | `bytes_down` | integer/uint64 | 目标 → 客户端的 Go 代理有效载荷累计字节 |
 | `udp_packets_up` | integer/uint64 | Go 路径成功交付到发送系统调用的上行 UDP 消息数；不证明远端已收到 |
@@ -871,7 +899,7 @@ Go ServeMux 的 GET 路由也匹配 HEAD；根路径 GET 注册还是一个兜�
 | 400 | `Content-Type 必须是 application/json` | `apiJSONContentType` | 仅三个 JSON 写接口需要正确媒体类型 |
 | 400 | `JSON 格式错误: json: unknown field "extra"` | `apiInvalidJSON` | 删除不属于该请求模型的字段 |
 | 400 | `请求只能包含一个 JSON 对象` | `apiJSONObjectOnly` | 检查是否拼接了多个 JSON 值 |
-| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | 缩小单次请求体，注意不存在批量规则接口 |
+| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | 缩小单次请求体，包括完整批量规则请求 |
 | 400 | `web port must be 1-65535` | `apiErrorDetail` | 设置 PUT 是否遗漏 port |
 | 400 | `tls_min_version 仅支持 1.2 或 1.3` | `apiTLSMinVersion` | 使用字符串 `"1.2"` 或 `"1.3"` |
 | 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | `apiStrictRequiresHTTPS` | 当前请求不是原生 HTTPS |
@@ -1266,9 +1294,9 @@ print("Requires service restart:", result["restart_required"])
 
 ### 15.2 并发修改
 
-Store 内部对更新加锁并原子替换配置文件，避免同一进程中配置写入交错，但 API 没有 ETag、If-Match、revision 或 compare-and-swap 机制。两个客户端分别读取旧 Rule 后各自 PUT，后提交者可能覆盖先提交者的不同字段修改。[^config-store][^routes]
+Store 内部对更新加锁并原子替换配置文件。`GET /api/config` 暴露 ETag/配置修订值；提供 `If-Match` 的写请求遇到旧版本返回 `412`，批量替换强制要求该条件。为兼容旧客户端，未提供 `If-Match` 的单规则或设置写入仍可能覆盖其他客户端的字段修改。[^config-store][^routes]
 
-建议对同一实例的规则/设置写操作在客户端侧串行化，提交前读取最新完整对象；它只能降低覆盖风险，不能在没有服务端版本条件的情况下提供严格并发安全。Token 轮换尤其应由单一受控流程执行。
+规则/设置写操作应读取最新完整对象并使用 `If-Match`；收到 `412` 后重新读取、审查变更。版本条件保护持久配置更新，不保证 nftables/conntrack 应用原子性。Token 轮换尤其应由单一受控流程执行。
 
 ### 15.3 重试与结果未知
 
@@ -1306,13 +1334,13 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 | `GET /api/rules`、`GET /api/rules/{id}` | 未实现；从 GET config/status 中读取 |
 | `PATCH /api/rules/{id}`、字段局部更新 | 未实现；读取完整 Rule 后 PUT |
 | `POST /api/login`、`POST /api/logout` | 未实现；直接 Bearer 认证，客户端本地清理 Token |
-| 多用户、角色、只读 Token、逐规则授权 | 未实现；单一管理员 Token |
-| 批量创建/删除、导入/导出原始配置 | 未实现；一个请求操作一条规则，GET config 不是全量磁盘配置 |
+| 多用户、通用角色、逐规则授权 | 未实现；仅管理员及受限监控令牌两种权限范围 |
+| 导入/导出实例原始完整配置 | 未实现；批量规则替换与可迁移模板导出均不包含凭据或实例恢复身份 |
 | 设置令牌为客户端指定值、读取当前明文令牌 | 未实现；只能由轮换接口生成新值，或由授权本地管理员处理 |
-| 远程重启、停止服务、热加载证书 | 未实现；本机运维操作 |
+| 远程重启、停止服务、证书自动续期 | 未实现；证书由外部续期，可鉴权校验后手动重载或重启 |
 | API 上传证书/私钥、ACME 签发 | 未实现；设置接口只接受服务器本地文件路径 |
 | 日志查询/下载、SSE、WebSocket、事件订阅 | 未实现 |
-| 匿名业务 `/healthz` | 未实现；状态 API 和 `/metrics` 均需要管理员认证 |
+| 匿名业务 `/healthz` | 未实现；状态 API 和 `/metrics` 要求管理员或监控令牌鉴权 |
 | 统计历史、流量计数重置、分页/筛选 | 未实现 |
 | 查询软件版本、动态 OpenAPI/Swagger 文档 | 本路由表未实现；`/api/bootstrap.name` 不是版本号 |
 | 读取/修改全局资源限制、conntrack mark、flowtable 总开关 | 未通过 API 暴露；在本地完整配置中设置 |
@@ -1327,6 +1355,7 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 |---|---|---|
 | `version` | 配置 schema 版本 `2`，不是软件发布版本 2.5.0 | GET config 不返回 |
 | `web.admin_token_sha256` | 管理员 Token 字符串的 SHA-256 | 不返回，不能通过 settings 设置 |
+| `web.monitor_token_sha256` | 已配置监控令牌时其字符串的 SHA-256 | 只返回 `monitor_token_configured` 状态；通过仅管理员可用的接口轮换/撤销 |
 | `web.require_https` | 安装流程设为 true，原始 Default 为 false | 只通过 `https.required` 读取；settings 不接受 |
 | `web.allow_unsafe_all_address_acl` | 默认 false | 不返回/不可通过 API 修改；严格模式仍拒绝 `/0` |
 | `resource_limits.max_tcp_connections` | 默认 8192；范围 `1–1000000` | 不返回/不可通过 API 修改 |
@@ -1339,7 +1368,21 @@ Store 内部对更新加锁并原子替换配置文件，避免同一进程中�
 
 ## 17. Prometheus 指标
 
-`GET /metrics` 共用管理 HTTPS、来源白名单及 Bearer 认证，GET 不要求 CSRF；成功返回 `text/plain; version=0.0.4; charset=utf-8`，不是 JSON。指标不输出规则名、转发端点或令牌，凭据仍拥有完整管理员权限，并非只读监控权限。不可用或预热时省略实时速率，保留的累计值须结合有效性指标解释；系统不会自动配置告警规则。全部 15 类指标、类型、标签及抓取示例见[统计说明](MONITORING.zh-CN.md)。[^metrics]
+`GET /metrics` 共用管理 HTTPS、来源白名单及 Bearer 认证，GET 不要求 CSRF；成功返回 `text/plain; version=0.0.4; charset=utf-8`，不是 JSON。指标不输出规则名、转发端点或令牌；建议使用受限监控令牌。不可用或预热时省略实时速率，保留的累计值须结合有效性指标解释；告警示例不会自动启用。全部 21 类指标、类型、标签及抓取示例见[统计说明](MONITORING.zh-CN.md)。[^metrics]
+
+## 18. 监控凭据与配置操作
+
+`POST /api/monitor-token/rotate` 创建或替换独立的 64 字符监控令牌，响应 `{ "token": "..." }`，明文**只显示一次**。`DELETE /api/monitor-token` 撤销令牌（`204`）。两者均要求管理员 Bearer、CSRF 及原有管理 ACL/TLS；`/api/config.monitor_token_configured` 只报告是否已配置，不返回明文或哈希。监控令牌仅能读取 `GET /api/status`、`GET /api/operations/latest`、`GET /api/operations/{id}` 与 `GET /metrics`；不能取得 CSRF、读取配置或写入。应妥善保存，泄露时及时轮换。
+
+`GET /api/config` 返回 `config_revision`，并以带双引号的相同值作为 `ETag` 响应头。这是已保存配置的 SHA-256 不透明修订值，**不是**软件版本号或凭据。写请求可发送 `If-Match: "<config_revision>"`，旧版本会收到 `412`；单条规则和设置接口为兼容旧客户端仍允许省略，但 `PUT /api/rules` **必须**提供（缺失返回 `428`）。遇到 `412` 应重新读取配置后审查变更；令牌轮换也会改变修订值。`PUT /api/settings` 返回新修订值；规则写入通过 `X-PortBridge-Config-Revision`、`X-PortBridge-Operation-ID`、`X-PortBridge-Application-State` 响应头返回，同时保留原有响应体和状态码。
+
+完整规则数组以 `{ "rules": [<完整 Rule>, ...] }` 发送给 `POST /api/rules/validate` 或 `POST /api/rules/preview`。两者均要求管理员 Bearer 和 CSRF，但**不保存、不应用**。校验结果包含 `valid`、`base_revision`、`saved:false`、`applied:false`；预览另外按 ID 列出 `added`、`updated`、`removed`、`unchanged`。此处只校验配置，不解析 DNS、不分配监听、不检查 nftables，也不证明旧连接已撤销。带当前 `If-Match` 的 `PUT /api/rules` 把完整规则列表作为一次配置文件更新原子保存，然后另行应用；响应包含 `saved`、`config_revision`、`operation_id`、`application_state`。空数组会删除全部期望规则。替换时须保留已有规则 ID；新 ID 由单规则 POST 生成。这里**不承诺**跨请求 nftables/conntrack 事务或数据面的整体原子切换。
+
+`GET /api/rules/template` 导出 `{ "format":"portbridge-rule-template-v1", "rules":[...] }`。省略规则 ID、管理员/监控凭据、证书路径与实例专属 nftables/恢复身份。模板中的目标端点和 ACL 策略仍可能敏感，共享前须审查。这是规则模板，**不是**可直接导入的整机备份，也不保证在另一实例应用安全。
+
+应用操作包含 `id`、`config_revision`、`state`、`rules[]`、`business_health:"not_checked"`、`saved_at`，完成时还有 `completed_at`。状态依次为 `saved` → `applying` → `applied`，异常时为 `application_failed` 或 `cleanup_pending`。逐规则观察包括 `desired`、`kernel_state`、`go_running` 和可选 `manager_error`。可轮询 `GET /api/operations/{id}` 或查看 `GET /api/status.latest_operation`；`applied` 表示管理器观察到控制面期望状态，**不是**端到端业务可用。`cleanup_pending` 表示旧内核转发或连接撤销尚不能确认。只在进程内保留最近 64 个操作，重启即清空；`404` 可能表示 ID 未知或已淘汰。仍须分别检查运行态和实际业务连通性。
+
+`POST /api/tls/reload` 要求管理员 Bearer 和 CSRF。它先校验服务器本地证书/私钥及当前有效期，再原子地将证书用于**新的** TLS 握手；已有会话保持协商时的 TLS 状态。校验失败不会替换已加载证书。它不会签发/续期证书，也不会更改监听、最低 TLS 策略、ACL 或凭据；这些配置变化仍可能要求重启。证书到期指标见 `/metrics` 和 WebGUI。
 
 ## 实现依据与源码链接
 

@@ -36,8 +36,8 @@ Try the [static WebUI demo](https://liying-official.github.io/Go-nftables-portbr
 | **nftables + Go** | nftables for eligible same-family traffic, optional software flowtable acceleration, and a Go proxy for cross-family forwarding. Explicit Go mode is also available per rule. |
 | **IPv4 / IPv6 in both directions** | IPv4 → IPv4, IPv6 → IPv6, IPv4 → IPv6 and IPv6 → IPv4, managed from the same interface. |
 | **Flexible port mapping** | TCP, UDP or both; single ports and equal-length port ranges covering up to 4096 ports. |
-| **Bilingual Web management** | Create, edit, enable, disable and delete rules, manage settings and rotate the administrator token. UI assets ship with the application, with no external CDN dependency. |
-| **Status, monitoring and automation** | Inspect runtime state and traffic observations, manage rules through an authenticated API, and integrate authenticated Prometheus metrics with your monitoring stack. |
+| **Bilingual Web management** | Create, edit, enable, disable and delete rules, manage settings, rotate administrator/monitoring tokens and explicitly reload a validated certificate. UI assets ship with the application, with no external CDN dependency. |
+| **Status, monitoring and automation** | Inspect runtime state and traffic observations; use restricted read-only monitoring credentials, configuration revisions, application-operation status, rule-set validation/preview/batch replacement, authenticated Prometheus metrics and optional Go TCP backup/connect checks. A connect check is not application health. |
 | **Built-in management controls** | Native HTTPS, administrator tokens, IP/CIDR allowlisting and CSRF checks for API writes. |
 
 ## Install

@@ -9,7 +9,7 @@
 **Language:** **English** | [简体中文](API.zh-CN.md)  
 
 > [!IMPORTANT]
-> Every management API requires an administrator Bearer token. Write operations also require `X-PortBridge-CSRF`. Normal installations should use HTTPS. Do not treat an HTTP success status by itself as proof that the data plane is active or that an old forwarding path has been fully retired.
+> Configuration reads and management writes require an administrator Bearer token. A separate monitoring token can read only status, application-operation status and metrics. Writes also require `X-PortBridge-CSRF`. Normal installations should use HTTPS. Do not treat an HTTP success status by itself as proof that the data plane is active or that an old forwarding path has been fully retired.
 
 This document describes the Web management HTTP API. It does not describe internal Go package APIs or the TCP/UDP protocol carried by forwarded application traffic. Field names, enum values, and error semantics follow the v2.5.0 implementation.
 
@@ -34,13 +34,14 @@ Examples contain documentation placeholders, not live credentials or deployment 
 - [15. Concurrency, Retries, and Operational Boundaries](#15-concurrency-retries-and-operational-boundaries)
 - [16. Capabilities Not Exposed by the Current API](#16-capabilities-not-exposed-by-the-current-api)
 - [17. Prometheus metrics](#17-prometheus-metrics)
+- [18. Monitoring credentials and configuration operations](#18-monitoring-credentials-and-configuration-operations)
 - [Implementation References and Source Links](#implementation-references-and-source-links)
 
 ---
 
 ## 1. API Scope and Quick Reference
 
-The current release explicitly registers **8 JSON management API routes** under `/api/`, plus the protected Prometheus `GET /metrics` endpoint, with no `/api/v1/` version prefix. The management API and WebGUI share the same listeners, port, TLS configuration, and IP ACL.[^routes]
+The current release explicitly registers **17 JSON management API routes** under `/api/`, plus the protected Prometheus `GET /metrics` endpoint, with no `/api/v1/` version prefix. The management API and WebGUI share the same listeners, port, TLS configuration, and IP ACL.[^routes]
 
 | Method | Path | Purpose | Success | CSRF | Request JSON |
 |---|---|---|---:|---|---|
@@ -52,8 +53,14 @@ The current release explicitly registers **8 JSON management API routes** under 
 | `POST` | `/api/rules` | Create a rule | `201` | Required | `Rule` |
 | `PUT` | `/api/rules/{id}` | Fully replace an existing rule | `200` | Required | `Rule` |
 | `DELETE` | `/api/rules/{id}` | Remove a rule from persistent configuration and request retirement | `204` | Required | None |
+| `GET` | `/api/operations/latest`, `/api/operations/{id}` | Read in-process application observations | `200` | No | None |
+| `POST` / `DELETE` | `/api/monitor-token/rotate`, `/api/monitor-token` | Rotate or revoke the monitoring token | `200` / `204` | Required | None |
+| `POST` | `/api/tls/reload` | Validate and reload the certificate for new TLS handshakes | `200` | Required | None |
+| `POST` | `/api/rules/validate`, `/api/rules/preview` | Validate or preview a complete rule set without saving | `200` | Required | `{ "rules": [...] }` |
+| `PUT` | `/api/rules` | Atomically save a complete rule set, then apply it | `200` | Required | `{ "rules": [...] }` |
+| `GET` | `/api/rules/template` | Export portable rule templates, excluding instance IDs and credentials | `200` | No | None |
 
-**All of the APIs above require the administrator Bearer token.** `/api/bootstrap` is not an anonymous login endpoint. There are currently no user accounts, roles, read-only tokens, or per-rule authorization scopes. A valid administrator token authorizes these management operations.[^auth]
+All routes require a Bearer token. Only `/api/status`, `/api/operations/latest`, `/api/operations/{id}` and `/metrics` accept the independent read-only monitoring token; the other routes require an administrator token. `/api/bootstrap` is not anonymous. There are no user accounts, general-purpose roles or per-rule authorization scopes.[^auth]
 
 To read the rule list, use `rules` from `/api/config`, or `rules[].rule` from `/api/status`. There is currently **no** `GET /api/rules` or `GET /api/rules/{id}`. Unregistered read paths return `404`; do not infer a read endpoint merely because a POST route exists.[^routes]
 
@@ -87,7 +94,7 @@ The server's default minimum TLS version is `1.2`; setting `tls_min_version:"1.3
 
 For self-signed certificates, verify the certificate fingerprint through a trusted channel first, then establish client trust. Examples in this document use `--cacert` or a Python trusted-CA file instead of bypassing certificate verification. The certificate SAN/name must also cover the address used by the client. `self_signed:false` alone does not prove that client-side trust validation succeeded.[^tls][^deployment]
 
-**Certificate-lifetime boundary:** HTTPS preparation, `--check-https` and settings validation reject expired/not-yet-valid material. The listener TLS loader itself does not enforce those dates or auto-renew certificates. A running process can outlive its certificate; monitor expiry and validate trust/name/time at the client, then replace material and restart. `https.certificate.enabled` is not proof of client trust or present validity.
+**Certificate-lifetime boundary:** HTTPS preparation, `--check-https`, settings validation and manual certificate reload reject expired/not-yet-valid material. Renewal is not automatic; a running process can outlive its certificate. Monitor expiry, replace server-local files, then invoke the authenticated reload action or restart. Clients must still validate trust, name and time. `https.certificate.enabled` is not proof of client trust or present validity.
 
 ### 2.2 Management IP ACL: evaluated before the token
 
@@ -97,7 +104,7 @@ In non-strict mode, the effective allow set is the union of loopback addresses, 
 
 `auto_lan_acl=true` discovers directly connected private/link-local prefixes on local interfaces that are up; it does not unconditionally permit every private address. The management allowlist supports at most **1024 normalized, de-duplicated entries**. Strict mode rejects `/0`; normal mode rejects `/0` by default as well, and the local risk override is not exposed through the API.[^acl][^config-validation]
 
-### 2.3 Administrator token
+### 2.3 Bearer tokens
 
 Every request uses one Authorization header:
 
@@ -105,7 +112,7 @@ Every request uses one Authorization header:
 Authorization: Bearer <64-character-admin-token>
 ```
 
-Tokens generated by the program use 32 random bytes encoded as 64 hexadecimal characters. The server persists and compares the SHA-256 hash of the token string; do not send the `admin_token_sha256` hash value as the token.[^token-storage]
+Administrator and monitoring tokens generated by the program use 32 random bytes encoded as 64 hexadecimal characters. The server persists and compares SHA-256 hashes of the token strings; do not send either stored hash as a token. The monitoring token is restricted to the four read endpoints listed in Section 18.[^token-storage]
 
 | Item | Current behavior |
 |---|---|
@@ -203,7 +210,7 @@ Content-Type: application/json; charset=utf-8
 Cache-Control: no-store
 ```
 
-There is no common `data` envelope. Create/update return a Rule directly; delete returns an empty body; settings returns `{ "ok": true, "restart_required": ... }`; other response bodies are documented per endpoint. Field ordering is not part of the protocol.[^json]
+There is no common `data` envelope. Create/update return a Rule directly; delete returns an empty body; settings includes `ok`, `restart_required` and `config_revision`; other response bodies are documented per endpoint. Field ordering is not part of the protocol.[^json]
 
 Unknown paths, method mismatches, HTTP ACL rejection, and transport failures are not guaranteed to be JSON. Clients should inspect the status and Content-Type before attempting JSON decoding, and must not JSON-decode a `204` response.[^routes][^headers]
 
@@ -264,6 +271,7 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
 
 ```json
 {
+  "config_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "web": {
     "port": 9080,
     "listen_ipv4": "127.0.0.1",
@@ -278,6 +286,7 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
     "dns_servers": []
   },
   "rules": [],
+  "monitor_token_configured": false,
   "https": {
     "required": true,
     "certificate": {
@@ -292,8 +301,10 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
 
 | Top-level field | Type | Description |
 |---|---|---|
+| `config_revision` | string | Opaque saved-configuration revision; also returned as a quoted `ETag` |
 | `web` | object | The 11 management-setting fields listed in Section 7, using the persisted configuration values |
 | `rules` | Rule[] | Persistent rule list in configuration order; does not include runtime-only cleanup records |
+| `monitor_token_configured` | boolean | Whether an independent monitoring token is configured; never exposes it or its hash |
 | `https` | object | Enforced HTTPS policy and currently loaded certificate information |
 
 `https` structure:
@@ -301,14 +312,14 @@ Example response for an empty-rule deployment prepared for native HTTPS (certifi
 | Field | Type | Description |
 |---|---|---|
 | `required` | boolean | Configured `web.require_https`, exposed read-only; it is not a settingsRequest field |
-| `certificate.enabled` | boolean | Whether native TLS certificate use was enabled at startup |
+| `certificate.enabled` | boolean | Whether a native TLS certificate is currently loaded |
 | `certificate.self_signed` | boolean | Whether the loaded leaf certificate matches the source's self-signed test; this is not a trust-validation conclusion |
 | `certificate.sha256` | string, optional | SHA-256 of the loaded leaf certificate's raw DER, 64 lowercase hexadecimal characters without colons |
 | `certificate.not_after` | string | Expiration time of the loaded certificate; may be the zero-value time when TLS is not active |
 
-**Persisted configuration and the running instance represent two different points in time.** If TLS paths are changed but the service has not restarted, `web.tls_cert_file`/`tls_key_file` may show the new paths while `https.certificate` still describes the old loaded certificate. Replacing certificate contents at the same path also does not hot-reload them.[^tls][^settings]
+**Persisted configuration and the running instance represent two different points in time.** If TLS paths change but neither reload nor restart has succeeded, `web.tls_cert_file`/`tls_key_file` may show the new paths while `https.certificate` still describes the old loaded certificate. Replacing certificate contents at the same path also requires explicit reload or restart.[^tls][^settings]
 
-This response is not raw `config.json`: it omits `version`, `resource_limits`, `nftables`, `admin_token_sha256`, and `allow_unsafe_all_address_acl`, and never returns certificate/private-key file contents. Do not treat the entire response as a full configuration backup or submit it verbatim to `/api/settings`; only `.web` matches the current settings request model.[^read-handlers][^config-model]
+This response is not raw `config.json`: it omits `version`, `resource_limits`, `nftables`, `admin_token_sha256`, `monitor_token_sha256`, and `allow_unsafe_all_address_acl`, and never returns certificate/private-key file contents. Do not treat the entire response as a full configuration backup or submit it verbatim to `/api/settings`; only `.web` matches the current settings request model.[^read-handlers][^config-model]
 
 ## 6. Read Runtime Status: `GET /api/status`
 
@@ -320,6 +331,7 @@ Empty-rule example:
 {
   "uptime_seconds": 120,
   "rules": [],
+  "latest_operation": null,
   "acl": {
     "auto": ["127.0.0.0/8", "::1/128"],
     "whitelist": [],
@@ -333,6 +345,7 @@ Empty-rule example:
 |---|---|---|
 | `uptime_seconds` | integer/int64 | Whole seconds since the Web Server object was created; not operating-system uptime |
 | `rules` | RuleRuntime[] | Runtime rules; see Section 11; sorted by rule name and then ID |
+| `latest_operation` | ApplyOperation or null | Latest in-process configuration application observation; null before any recorded rule write |
 | `acl.auto` | string[] | Current effective automatically allowed prefixes; always includes loopback, even when automatic LAN discovery is disabled |
 | `acl.whitelist` | string[] | Current effective persistent management allowlist |
 | `acl.bootstrap` | string[] | Current effective temporary startup allowlist; empty in strict mode |
@@ -357,8 +370,8 @@ A `200` from the status endpoint only means that the read succeeded. Rule startu
 | `strict_ip_allowlist` | boolean | Strict management allowlist; current request must already use native HTTPS | ACL refreshed immediately |
 | `allow_insecure_http` | boolean | Explicit acknowledgement for non-loopback plaintext HTTP; cannot be true when `require_https=true` | A change contributes to restart calculation |
 | `whitelist` | string[] | IPs or CIDRs; normalized, de-duplicated, sorted; maximum 1024 | ACL refreshed immediately |
-| `tls_cert_file` | string | Absolute server-local certificate-file path; configured together with private key | Restart |
-| `tls_key_file` | string | Absolute server-local private-key path; configured together with certificate | Restart |
+| `tls_cert_file` | string | Absolute server-local certificate-file path; configured together with private key | Validated manual reload or restart |
+| `tls_key_file` | string | Absolute server-local private-key path; configured together with certificate | Validated manual reload or restart |
 | `tls_min_version` | string | `"1.2"` / `"1.3"`; omitted or empty preserves current policy | Restart when the effective policy changes |
 | `dns_servers` | string[] | Up to 8 de-duplicated DNS servers; empty uses the system resolver | Resolver updated and desired rules reapplied |
 
@@ -389,13 +402,14 @@ Successful `200 OK`:
 ```json
 {
   "ok": true,
-  "restart_required": true
+  "restart_required": true,
+  "config_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 ```
 
-`restart_required` compares persisted settings with the listener configuration captured **when the listener started**, not with the previously saved configuration. Re-saving the same unapplied change can therefore continue returning true; restoring values to the currently running listener configuration can return false. Changes to strict ACL, automatic LAN, and the allowlist themselves do not require restart.[^settings]
+`restart_required` compares persisted settings with the current listener policy (initially captured at startup; certificate paths update after a successful explicit reload), not with the previously saved configuration. Re-saving the same unapplied change can therefore continue returning true; restoring values to the currently running listener configuration can return false. Changes to strict ACL, automatic LAN, and the allowlist themselves do not require restart.[^settings]
 
-If certificate contents change at the same path, this comparison does not inspect file contents and cannot be relied on to detect that replacement. There is also no dedicated “pending restart” query or service restart endpoint.[^settings][^routes]
+If certificate contents change at the same path, this comparison does not inspect file contents and cannot be relied on to detect that replacement. Use `POST /api/tls/reload` to validate and publish the new certificate for subsequent handshakes. Listener addresses, port and TLS minimum changes still require restart; there is no remote service restart endpoint.[^settings][^routes]
 
 ### 7.3 Additional checks for strict allowlisting
 
@@ -555,7 +569,7 @@ For leftover runtime state, inspect `kernel_state` and `stats.last_error`, allow
 
 ## 10. Complete Rule Schema and Validation
 
-The Rule schema defines **27 possible JSON fields**, not a guarantee that each response includes all 27 (`omitempty` rules are listed in Section 10.7). “Default” below means the result produced by `NormalizeRule` for API create/replace requests; it does not imply the WebGUI form's default selection. `protocol` has no API default, while omitted `enabled` becomes false.[^config-model][^normalize-rule]
+The Rule schema defines **32 possible JSON fields**, not a guarantee that each response includes all 32 (`omitempty` rules are listed in Section 10.7). “Default” below means the result produced by `NormalizeRule` for API create/replace requests; it does not imply the WebGUI form's default selection. `protocol` has no API default, while omitted `enabled` becomes false.[^config-model][^normalize-rule]
 
 ### 10.1 Identity, protocol, and target
 
@@ -571,11 +585,18 @@ The Rule schema defines **27 possible JSON fields**, not a guarantee that each r
 | `target_host` | string | Required | Non-empty after trimming, maximum 253 bytes; IP literal or hostname for the resolver, not a URL |
 | `target_port` | integer | Required | `1–65535` |
 | `target_port_end` | integer | `0` (single port) | Must define the same number of ports as the listen range; end not lower than start |
+| `backup_target_host` | string | Empty (disabled) | Optional Go TCP backup hostname/IP; resolved and authorized before application; not supported by the nft or UDP path |
+| `backup_target_port` | integer | Primary target port when backup host is set | Backup range must fit 1–65535 and match the listener range width |
+| `dns_cache_ttl_seconds` | integer | 300 | 1–3600; bounds reuse of previously resolved, reauthorized addresses after a periodic DNS failure |
+| `tcp_health_interval_seconds` | integer | 0 (disabled) | Optional Go TCP connect check, 5–3600; not application-layer health; at most 256 check endpoints across rules |
+| `tcp_health_timeout_seconds` | integer | 3 when check enabled | 1–30; requires a health interval |
 | `enabled` | boolean | `false` | Administrator-desired activation state, not runtime feedback |
 | `allow_private_target` | boolean | `false` | Explicitly permits restricted targets only when constrained by the CIDR allowlist |
 | `target_cidr_allowlist` | string[] | Empty | CIDR notation required; at most 64 normalized/de-duplicated entries; bare IPs and `/0` are rejected |
 
 Outer square brackets are stripped from `listen_host`/`target_host`, e.g. `[::1]` → `::1`; the field itself must not contain a port. Hostname DNS resolution is not performed as part of literal-IP configuration validation, so “saved successfully” does not mean the hostname is reachable.[^normalize-rule][^config-validation][^plan]
+
+For an optional Go TCP backup, a failed primary dial tries the backup. If the optional connect check currently reports only the backup reachable, the backup is tried first; failure then tries the primary. These are TCP-handshake observations, not application-level health. DNS resolution/target authorization must succeed during planning; a backup is not used to bypass a failed or unauthorized primary DNS plan.
 
 ### 10.2 TCP/UDP common limits and connection budgets
 
@@ -678,6 +699,11 @@ The following Rule fields use `omitempty` and can be absent when zero/empty:
 data_plane
 listen_port_end
 target_port_end
+backup_target_host
+backup_target_port
+dns_cache_ttl_seconds
+tcp_health_interval_seconds
+tcp_health_timeout_seconds
 udp_workers
 udp_batch_size
 udp_packet_buffer_size
@@ -702,6 +728,7 @@ Each element of `/api/status.rules[]` has this structure:[^manager-runtime]
 | `traffic` | TrafficSnapshot | Background-sampled Go/nft observations, hook counters, per-rule rates and validity flags; see [section 11.5](#115-trafficsnapshot-and-sampling-validity) and [monitoring](MONITORING.en-US.md) |
 | `data_plane` | string | Data-plane label from the runtime/risk perspective; distinct from `rule.data_plane` |
 | `go_running` | boolean | Whether at least one registered Go runner exists for the logical rule; not proof that every derived ingress path is healthy |
+| `backend_connectivity` | object | Optional Go TCP connect-check result: `check_type:"tcp_connect"`, status `not_checked`, `warming_up`, `primary_reachable`, `backup_reachable` or `unreachable`, and optional `checked_at`; never application health |
 | `kernel_state` | string | Manager classification of kernel-state evidence; see below |
 
 Runtime `data_plane` values:
@@ -745,6 +772,7 @@ Counters are aggregated on the logical rule's Stats object. Workload counters ar
 | `total_tcp` | integer/uint64 | Cumulative TCP admissions through the Go connection budget; an upstream dial can fail after this increment |
 | `total_udp_sessions` | integer/uint64 | Cumulative Go UDP sessions created; not unique client IP count |
 | `tcp_rejected` | integer/uint64 | Go TCP rejections caused by source identification/resource budgets; not all connection errors |
+| `tcp_fallbacks` | integer/uint64 | Go TCP connections established through the configured backup target; not application health |
 | `bytes_up` | integer/uint64 | Cumulative Go-proxy payload bytes from client → target |
 | `bytes_down` | integer/uint64 | Cumulative Go-proxy payload bytes from target → client |
 | `udp_packets_up` | integer/uint64 | Upstream UDP messages successfully handed to the send syscall by the Go path; does not prove remote receipt |
@@ -871,7 +899,7 @@ The table below preserves current source wording. Dynamic IDs, addresses, and op
 | 400 | `Content-Type 必须是 application/json` | `apiJSONContentType` | Only the three JSON write endpoints need this media type |
 | 400 | `JSON 格式错误: json: unknown field "extra"` | `apiInvalidJSON` | Remove fields that do not belong to the request model |
 | 400 | `请求只能包含一个 JSON 对象` | `apiJSONObjectOnly` | Check for concatenated JSON values |
-| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | Reduce request size; there is no batch-rule endpoint |
+| 400 | `JSON 请求体不能超过 1048576 字节` | `apiJSONTooLarge` | Reduce request size, including complete batch-rule requests |
 | 400 | `web port must be 1-65535` | `apiErrorDetail` | Check whether settings PUT omitted `port` |
 | 400 | `tls_min_version 仅支持 1.2 或 1.3` | `apiTLSMinVersion` | Use string `"1.2"` or `"1.3"` |
 | 400 | `请先配置 TLS 并重启服务，再通过 HTTPS 启用严格 IP 白名单` | `apiStrictRequiresHTTPS` | Current request is not native HTTPS |
@@ -1268,9 +1296,9 @@ Automation should therefore model two results: the **configuration submission re
 
 ### 15.2 Concurrent modification
 
-The Store locks updates and atomically replaces the configuration file, preventing interleaved writes inside one process, but the API exposes no ETag, If-Match, revision, or compare-and-swap mechanism. If two clients separately read an old Rule and then both PUT complete replacements, the later write can overwrite unrelated fields changed by the first client.[^config-store][^routes]
+The Store locks updates and atomically replaces the configuration file. `GET /api/config` exposes an ETag/configuration revision; writes that supply `If-Match` reject stale revisions with `412`, and batch replacement requires it. For compatibility, single-rule and settings writes without `If-Match` can still overwrite fields changed by another client.[^config-store][^routes]
 
-Serialize rule/settings writes per instance on the client side and read the latest complete object before submission. This reduces overwrite risk but cannot provide strict optimistic concurrency without a server-side version condition. Token rotation should be owned by a single controlled workflow.
+Use `If-Match` with the latest complete object for rule/settings writes and re-read/review after `412`. The version condition protects the persisted configuration update, not nftables/conntrack application atomicity. Token rotation should be owned by a single controlled workflow.
 
 ### 15.3 Retry behavior and unknown outcomes
 
@@ -1308,13 +1336,13 @@ The table below prevents clients from inventing endpoints based on common REST n
 | `GET /api/rules`, `GET /api/rules/{id}` | Not implemented; read rules from GET config/status |
 | `PATCH /api/rules/{id}`, partial field updates | Not implemented; read the complete Rule and PUT it |
 | `POST /api/login`, `POST /api/logout` | Not implemented; authenticate directly with Bearer, clear token client-side on logout |
-| Multiple users, roles, read-only tokens, per-rule authorization | Not implemented; one administrator token |
-| Batch create/delete, raw config import/export | Not implemented; one rule per request, and GET config is not the complete disk configuration |
+| Multiple users, general roles, per-rule authorization | Not implemented; administrator and restricted monitoring tokens are the only credential scopes |
+| Raw instance configuration import/export | Not implemented; batch rule replacement and portable rule-template export do not include credentials or instance recovery identity |
 | Set token to a client-chosen value or read current plaintext token | Not implemented; rotation can only generate a new value, or an authorized local administrator can manage local state |
-| Remote restart/stop, certificate hot reload | Not implemented; local operational action |
+| Remote restart/stop, automatic certificate renewal | Not implemented; use local renewal and authenticated validated certificate reload or restart |
 | Certificate/private-key upload, ACME issuance | Not implemented; settings accept server-local file paths only |
 | Log query/download, SSE, WebSocket, event subscription | Not implemented |
-| Anonymous workload `/healthz` | Not implemented; status and `/metrics` both require administrator authentication |
+| Anonymous workload `/healthz` | Not implemented; status and `/metrics` require an administrator or monitoring token |
 | Statistics history, counter reset, paging/filtering | Not implemented |
 | Software-version query, dynamic OpenAPI/Swagger | Not registered; `/api/bootstrap.name` is not a version number |
 | Read/change global resource limits, conntrack mark, flowtable master switch | Not exposed through API; configured in local full configuration |
@@ -1329,6 +1357,7 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 |---|---|---|
 | `version` | Config schema version `2`, not software release 2.5.0 | Not returned by GET config |
 | `web.admin_token_sha256` | SHA-256 of administrator token string | Not returned; cannot be set through settings |
+| `web.monitor_token_sha256` | SHA-256 of monitoring token string when configured | Only `monitor_token_configured` is returned; rotate/revoke through dedicated administrator endpoints |
 | `web.require_https` | Installation flow sets true; raw Default is false | Read only through `https.required`; settings does not accept it |
 | `web.allow_unsafe_all_address_acl` | Default false | Not returned/not API-modifiable; strict mode still rejects `/0` |
 | `resource_limits.max_tcp_connections` | Default 8192; range `1–1000000` | Not returned/not API-modifiable |
@@ -1341,7 +1370,21 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 
 ## 17. Prometheus metrics
 
-`GET /metrics` shares management HTTPS, source-IP allowlisting and Bearer authentication; GET needs no CSRF. Success returns `text/plain; version=0.0.4; charset=utf-8`, not JSON. Metrics omit rule names, forwarding endpoints and tokens. The credential still grants full administrator access, not read-only monitoring. Unavailable/warming-up rate samples are omitted; retained counters must be interpreted with validity gauges. No alert rules are configured automatically. All 15 metric families, their types/labels and a scrape example are documented in [monitoring](MONITORING.en-US.md).[^metrics]
+`GET /metrics` shares management HTTPS, source-IP allowlisting and Bearer authentication; GET needs no CSRF. Success returns `text/plain; version=0.0.4; charset=utf-8`, not JSON. Metrics omit rule names, forwarding endpoints and tokens. Prefer the restricted monitoring token. Unavailable/warming-up rate samples are omitted; retained counters must be interpreted with validity gauges. Example alerts are not configured automatically. All 21 metric families, their types/labels and a scrape example are documented in [monitoring](MONITORING.en-US.md).[^metrics]
+
+## 18. Monitoring credentials and configuration operations
+
+`POST /api/monitor-token/rotate` creates or replaces an independent 64-character token and returns `{ "token": "..." }` **once**. `DELETE /api/monitor-token` revokes it (`204`). Both require administrator Bearer, CSRF and normal management ACL/TLS; `/api/config.monitor_token_configured` reports only whether one is set, never its value or hash. The monitoring token is accepted exclusively by `GET /api/status`, `GET /api/operations/latest`, `GET /api/operations/{id}` and `GET /metrics`. It cannot obtain a CSRF token, read configuration or write. Restrict its storage and rotate it if exposed.
+
+`GET /api/config` returns `config_revision` and the same quoted value as an `ETag` header. It is an opaque SHA-256 revision of the saved configuration, **not** a version number or a credential. Send `If-Match: "<config_revision>"` on a write to reject a stale version with `412`; it is optional for existing single-rule and settings clients but **required** for `PUT /api/rules` (`428` if missing). Read the current configuration again before retrying `412`. Token rotation also changes the revision. `PUT /api/settings` returns its new revision; rule writes return `X-PortBridge-Config-Revision`, `X-PortBridge-Operation-ID` and `X-PortBridge-Application-State` headers. They preserve their existing response bodies/status codes.
+
+For a complete rules array, submit `{ "rules": [<complete Rule>, ...] }` to `POST /api/rules/validate` or `POST /api/rules/preview`. Both require administrator Bearer and CSRF, but do **not** save or apply. Validation returns `valid`, `base_revision`, `saved:false`, `applied:false`; preview additionally lists rule IDs under `added`, `updated`, `removed`, `unchanged`. This validates configuration only; it does not resolve DNS, allocate listeners, check nftables or prove old-connection retirement. `PUT /api/rules` with the same body and a current `If-Match` saves the entire rules list atomically as one configuration file update, then separately applies it. It returns `saved`, `config_revision`, `operation_id`, `application_state`. An empty array removes every desired rule. Existing rule IDs must be preserved in a replacement; use single-rule POST to generate new IDs. There is **no** cross-request nftables/conntrack transaction or all-or-nothing data-plane cutover.
+
+`GET /api/rules/template` exports `{ "format":"portbridge-rule-template-v1", "rules":[...] }`. Rule IDs are omitted, as are administrator/monitoring credentials, certificate paths and instance-specific nftables/recovery identity. Target endpoints and ACL policy in templates can still be sensitive: review before sharing. The response is a template, **not** an importable whole-instance backup and not a promise that applying it elsewhere is safe.
+
+An application operation records `id`, `config_revision`, `state`, `rules[]`, `business_health:"not_checked"`, `saved_at` and `completed_at` when finished. States are `saved` → `applying` → `applied`, or `application_failed` / `cleanup_pending`. Each rule observation has `desired`, `kernel_state`, `go_running` and optional `manager_error`. Poll `GET /api/operations/{id}` or inspect `GET /api/status.latest_operation`; `applied` means the manager observed the requested control-plane state, **not** end-to-end business reachability. `cleanup_pending` means old kernel forwarding or connection retirement cannot yet be confirmed. The most recent 64 operations are in memory only; process restart discards them. `404` may mean an unknown or evicted operation. Continue checking runtime state and actual workload connectivity separately.
+
+`POST /api/tls/reload` requires administrator Bearer and CSRF. It validates the configured server-local certificate/key and their current validity before atomically publishing the certificate for **new** TLS handshakes; existing sessions continue with their negotiated TLS state. Failed validation leaves the previous certificate loaded. It does not issue/renew a certificate or change the listener, TLS minimum policy, ACL or credentials; those settings may still require restart. Loaded certificate expiry is available in `/metrics` and the WebGUI.
 
 ## Implementation References and Source Links
 

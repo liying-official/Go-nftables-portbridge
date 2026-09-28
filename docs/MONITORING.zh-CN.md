@@ -26,7 +26,7 @@ sudo sysctl -w net.netfilter.nf_conntrack_acct=1
 
 ## Prometheus `/metrics`
 
-`GET /metrics` 共用管理 HTTPS 监听、IP 白名单及管理员 Bearer 认证，不匿名开放，GET 不需要 CSRF。响应采用 Prometheus text 0.0.4 格式。此令牌仍拥有完整管理权限，必须保护凭据文件及抓取主机。指标按规则 ID/协议标记，不输出规则名称或转发端点地址。
+`GET /metrics` 共用管理 HTTPS 监听和直连来源 IP 白名单。管理员令牌或独立监控令牌均可访问；监控令牌可在 WebGUI“访问与安全”中创建、轮换和撤销，只能读取 `/metrics`、`/api/status` 及应用操作状态，不能读取配置或修改内容。日常抓取应使用受保护的监控令牌文件，不要复用管理员令牌。GET 不需要 CSRF。指标按规则 ID/协议标记，不输出规则名称或转发端点地址。
 
 ```yaml
 scrape_configs:
@@ -45,12 +45,16 @@ scrape_configs:
 
 替换示例主机名和证书路径，自签证书须先核对指纹并建立信任，不要用 `insecure_skip_verify` 绕过校验。将抓取主机的直连来源 IP 加入管理白名单。
 
-全部 15 类指标如下。除运行时间外，均包含 `rule_id` 与 `protocol` 标签（配置规则的协议为 `tcp`、`udp` 或 `both`）。“附加标签”列是标签名，不是可直接执行的 PromQL 选择器；`source` 的值为 `go` 或 `nft`，`direction` 为 `up` 或 `down`，`hook` 标识被观测的 hook。
+全部 21 类指标如下。运行时间和 TLS 证书指标没有规则标签；其余指标包含 `rule_id` 与 `protocol` 标签（`tcp`、`udp` 或 `both`）。“附加标签”列是标签名，不是可直接执行的 PromQL 选择器；`source` 为 `go` 或 `nft`，`direction` 为 `up` 或 `down`，`hook` 标识被观测的 hook。
 
 | 指标 | 类型 | 附加标签 | 含义 |
 |---|---|---|---|
 | `portbridge_uptime_seconds` | gauge | 无，也没有规则标签 | Web Server 创建以来的秒数 |
+| `portbridge_tls_certificate_loaded` | gauge | 无，也没有规则标签 | 当前管理 TLS 证书是否已加载（0/1） |
+| `portbridge_tls_certificate_not_after_timestamp_seconds` | gauge | 无，也没有规则标签 | 已加载证书的 Unix 到期时间；未启用 TLS 时不输出 |
+| `portbridge_tls_certificate_seconds_until_expiry` | gauge | 无，也没有规则标签 | 证书剩余有效秒数；到期后可为负；未启用 TLS 时不输出 |
 | `portbridge_rule_running` | gauge | 无 | 管理器运行/风险标志（0/1），不等于端到端健康 |
+| `portbridge_rule_desired_enabled` | gauge | 无 | 持久化配置中的期望启用状态（0/1），不保证转发已生效 |
 | `portbridge_rule_bytes_total` | counter | `source`、`direction` | 累计观测值，分别为 Go 有效载荷或 nft L3 字节 |
 | `portbridge_rule_bytes_per_second` | gauge | `source`、`direction` | 最近字节速率估计，乘八可转换为 bit/s |
 | `portbridge_rule_sample_available` | gauge | `source` | 来源样本新鲜且可用（0/1） |
@@ -62,10 +66,14 @@ scrape_configs:
 | `portbridge_nft_hooks_available` | gauge | 无 | 自有 hook 样本新鲜且可用（0/1） |
 | `portbridge_nft_counter_resets_total` | counter | 无 | 检测到的内核计数下降次数 |
 | `portbridge_go_active_tcp_connections` | gauge | 无 | 当前 Go TCP 连接数 |
+| `portbridge_go_tcp_fallbacks_total` | counter | 无 | 通过可选 Go TCP 备用目标建立的连接数 |
+| `portbridge_go_tcp_connect_status` | gauge | `status` | 可选 TCP 建连检查的最近状态，**不是**应用层健康 |
 | `portbridge_go_active_udp_sessions` | gauge | 无 | 当前 Go UDP 会话数 |
 | `portbridge_go_udp_drops_total` | counter | 无 | Go 应用可见丢包，不是网络整体丢包率 |
 
-字节速率只在两个来源有效标志均为 true 时输出。不可用时，字节/包累计值仍可能以旧值或初始零值存在，不能据此断言采样成功。hook 序列仅在曾观测到对应 hook 后出现，新鲜度还须检查 `portbridge_nft_hooks_available`。进程重启或规则运行态被移除后计数可重置，不是持久总量；采集器不自动创建告警规则。完整 JSON 流量结构见 [API 第 11.5 节](API.zh-CN.md#115-trafficsnapshot-与采样有效性)。
+字节速率只在两个来源有效标志均为 true 时输出。不可用时，字节/包累计值仍可能以旧值或初始零值存在，不能据此断言采样成功。hook 序列仅在曾观测到对应 hook 后出现，新鲜度还须检查 `portbridge_nft_hooks_available`。进程重启或规则运行态被移除后计数可重置，不是持久总量；完整 JSON 流量结构见 [API 第 11.5 节](API.zh-CN.md#115-trafficsnapshot-与采样有效性)。
+
+项目提供可导入的 [Grafana 仪表盘](monitoring/portbridge-dashboard.json)和 [Prometheus 告警规则示例](monitoring/portbridge-alerts.yml)。导入仪表盘时选择 Prometheus 数据源，并通过 Prometheus 的 `rule_files` 加载告警文件；需按实际部署调整 job 标签和阈值。`running` 标志也可能表达旧内核转发未完全撤销的风险，不能将其或 TCP 建连检查当作端到端业务健康。告警文件不会由 PortBridge 自动启用。证书续期仍由外部工具负责；验证新文件后，可在 WebGUI 或通过 `POST /api/tls/reload` 重载。重载只影响新 TLS 握手，不改变已有会话、监听地址或 TLS 最低版本。
 
 以下 nft 速率序列在样本不可用或预热时不会输出：
 

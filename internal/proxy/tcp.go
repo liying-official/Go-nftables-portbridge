@@ -30,6 +30,17 @@ func (r *runner) startTCP(ep listenEndpoint, targetPort int) error {
 	}
 	var active sync.Map
 	target := net.JoinHostPort(r.rule.TargetHost, strconv.Itoa(targetPort))
+	backup := ""
+	if r.rule.BackupTargetHost != "" {
+		backupPort := r.rule.BackupTargetPort + targetPort - r.rule.TargetPort
+		backup = net.JoinHostPort(r.rule.BackupTargetHost, strconv.Itoa(backupPort))
+	}
+	var health *tcpTargetState
+	if r.rule.TCPHealthIntervalSeconds > 0 {
+		health = &tcpTargetState{}
+		r.healthStates = append(r.healthStates, health)
+		r.startTCPHealth(health, target, backup)
+	}
 	dialer := &net.Dialer{
 		Timeout:   time.Duration(r.rule.ConnectTimeoutSeconds) * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -69,7 +80,7 @@ func (r *runner) startTCP(ep listenEndpoint, targetPort int) error {
 				defer r.stats.activeTCP.Add(-1)
 				defer r.resources.releaseTCP(r.budget, source)
 				defer client.Close()
-				r.handleTCP(client, &active, target, dialer)
+				r.handleTCPWithBackup(client, &active, target, backup, health, dialer)
 			}()
 		}
 	}()
@@ -77,10 +88,17 @@ func (r *runner) startTCP(ep listenEndpoint, targetPort int) error {
 }
 
 func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dialer *net.Dialer) {
-	upstream, err := dialer.DialContext(r.ctx, "tcp", target)
+	r.handleTCPWithBackup(client, active, target, "", nil, dialer)
+}
+
+func (r *runner) handleTCPWithBackup(client net.Conn, active *sync.Map, target, backup string, health *tcpTargetState, dialer *net.Dialer) {
+	upstream, usedBackup, err := r.dialTCPBackend(target, backup, health, dialer)
 	if err != nil {
 		r.logger.Debug("TCP target connect failed", "rule", r.name(), "client", client.RemoteAddr(), "target", target, "error", err)
 		return
+	}
+	if usedBackup {
+		r.stats.tcpFallbacks.Add(1)
 	}
 	active.Store(upstream, struct{}{})
 	defer active.Delete(upstream)
@@ -125,6 +143,30 @@ func (r *runner) handleTCP(client net.Conn, active *sync.Map, target string, dia
 		r.stats.bytesDown.Add(uint64(down)) // #nosec G115 -- io.Copy byte counts are non-negative and checked above.
 	}
 	r.stats.mu.Unlock()
+}
+
+func (r *runner) dialTCPBackend(primary, backup string, health *tcpTargetState, dialer *net.Dialer) (net.Conn, bool, error) {
+	if backup == "" {
+		conn, err := dialer.DialContext(r.ctx, "tcp", primary)
+		return conn, false, err
+	}
+	backupFirst := health != nil && health.checkedUnixNano.Load() != 0 && !health.primaryReachable.Load() && health.backupReachable.Load()
+	first, second := primary, backup
+	if backupFirst {
+		first, second = backup, primary
+	}
+	conn, firstErr := dialer.DialContext(r.ctx, "tcp", first)
+	if firstErr == nil {
+		return conn, first == backup, nil
+	}
+	if r.ctx.Err() != nil {
+		return nil, false, firstErr
+	}
+	conn, secondErr := dialer.DialContext(r.ctx, "tcp", second)
+	if secondErr == nil {
+		return conn, second == backup, nil
+	}
+	return nil, false, errors.Join(firstErr, secondErr)
 }
 
 func tcpSourceAddress(address net.Addr) (netip.Addr, bool) {

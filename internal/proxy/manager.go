@@ -39,12 +39,13 @@ type Manager struct {
 }
 
 type RuleRuntime struct {
-	Rule        config.Rule     `json:"rule"`
-	Stats       StatsSnapshot   `json:"stats"`
-	DataPlane   string          `json:"data_plane"`
-	GoRunning   bool            `json:"go_running"`
-	KernelState string          `json:"kernel_state"`
-	Traffic     TrafficSnapshot `json:"traffic"`
+	Rule                config.Rule         `json:"rule"`
+	Stats               StatsSnapshot       `json:"stats"`
+	DataPlane           string              `json:"data_plane"`
+	GoRunning           bool                `json:"go_running"`
+	KernelState         string              `json:"kernel_state"`
+	BackendConnectivity BackendConnectivity `json:"backend_connectivity"`
+	Traffic             TrafficSnapshot     `json:"traffic"`
 }
 
 func NewManager(logger *slog.Logger, dnsServers ...[]string) *Manager {
@@ -391,6 +392,7 @@ func (m *Manager) retireRemovedRules(desired map[string]config.Rule, blockedRule
 			delete(m.budgets, id)
 			delete(m.dataPlanes, id)
 			delete(m.resolved, id)
+			delete(m.resolved, id+":backup")
 			delete(m.nftTombstones, id)
 		}
 	}
@@ -439,20 +441,26 @@ func (m *Manager) Runtime() []RuleRuntime {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]RuleRuntime, 0, len(m.rules))
+	backends := make(map[string]BackendConnectivity, len(m.runners))
+	for _, run := range m.runners {
+		id := run.rule.ID
+		current := run.backendConnectivity()
+		if previous, exists := backends[id]; exists {
+			current = mergeBackendConnectivity(previous, current)
+		}
+		backends[id] = current
+	}
 	for id, r := range m.rules {
 		kernelState, _ := m.nftRuleState(id)
-		goRunning := false
-		for _, run := range m.runners {
-			if run.rule.ID == id {
-				goRunning = true
-				break
-			}
+		backend, goRunning := backends[id]
+		if !goRunning {
+			backend = BackendConnectivity{Status: "not_checked", CheckType: "tcp_connect"}
 		}
 		traffic := TrafficSnapshot{}
 		if m.telemetry != nil {
 			traffic = m.telemetry.snapshot(id, m.stats[id])
 		}
-		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id], GoRunning: goRunning, KernelState: kernelState, Traffic: traffic})
+		out = append(out, RuleRuntime{Rule: r, Stats: m.stats[id].snapshot(), DataPlane: m.dataPlanes[id], GoRunning: goRunning, KernelState: kernelState, BackendConnectivity: backend, Traffic: traffic})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Rule.Name == out[j].Rule.Name {
@@ -489,9 +497,10 @@ type runner struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	mu      sync.Mutex
-	closers []func()
-	wg      sync.WaitGroup
+	mu           sync.Mutex
+	closers      []func()
+	healthStates []*tcpTargetState
+	wg           sync.WaitGroup
 }
 
 func newRunner(rule config.Rule, stats *Stats, logger *slog.Logger, resolvers ...*DNSResolver) *runner {

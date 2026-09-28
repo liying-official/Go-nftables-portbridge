@@ -4,7 +4,7 @@
 
 [Open the demo](https://liying-official.github.io/Go-nftables-portbridge/) · [Documentation](INDEX.md)
 
-Use the public, case-sensitive demo password **`PortBridge`**. Switch English / 简体中文 from the language menu. You can explore the dashboard, edit simulated rules and settings, simulate token rotation, or reset the example data.
+Use the public, case-sensitive demo password **`PortBridge`**. Switch English / 简体中文 from the language menu. You can explore the dashboard, edit simulated rules and settings, simulate administrator/monitoring token rotation and certificate reload, or reset the example data. These controls never create a real credential or change a server.
 
 This is a public static demonstration, not a protected management service. The password is visible in the published JavaScript and does not provide access control. Do not enter real tokens, passwords, certificates, private addresses or deployment details. Rules, counters, certificate metadata and settings are synthetic. Changes live only in page memory and reset on reload; only the public demo login and language preference use demo-specific browser-storage keys.
 
@@ -24,7 +24,7 @@ node scripts/test-pages-demo.mjs
 
 [打开演示站](https://liying-official.github.io/Go-nftables-portbridge/?lang=zh-CN) · [文档索引](INDEX.md)
 
-公开演示密码为 **`PortBridge`**，区分大小写。可通过语言菜单切换简体中文 / English，体验仪表盘、模拟规则与设置编辑、模拟令牌轮换及数据重置。
+公开演示密码为 **`PortBridge`**，区分大小写。可通过语言菜单切换简体中文 / English，体验仪表盘、模拟规则与设置编辑、模拟管理员/监控令牌轮换、证书重载及数据重置。这些控件不会创建真实凭据或修改服务器。
 
 这是公开静态演示，不是受保护的管理服务。密码可从公开 JavaScript 中读取，不能提供访问控制。请勿输入真实令牌、密码、证书、私有地址或部署信息。规则、计数、证书资料和设置均为模拟数据；修改只保留在当前页面内存，刷新即重置。只有公开演示登录状态与语言偏好使用演示专用的浏览器存储键。
 

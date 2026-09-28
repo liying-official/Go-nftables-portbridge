@@ -180,7 +180,7 @@ The installer can change forwarding sysctls and install/enable a service; it is 
 
 ## Certificate renewal and time validity
 
-`--check-https`, HTTPS preparation and settings validation inspect certificate validity dates. The listener loads its certificate at startup; it does not automatically renew or hot-reload it. Its TLS loader alone does not reject an expired/not-yet-valid certificate, and an already-running process does not terminate merely because its certificate expires. Correctly validating clients reject invalid certificates. Monitor expiry, replace the certificate/key safely and restart the service; recheck from a validating client.
+`--check-https`, HTTPS preparation, settings validation and explicit certificate reload inspect certificate validity dates. The listener loads its certificate at startup but does not automatically renew it; an already-running process does not terminate merely because its certificate expires. Correctly validating clients reject invalid certificates. Monitor `/metrics` expiry gauges, replace server-local certificate/key files safely, then use the administrator-only WebGUI reload action or `POST /api/tls/reload` for new handshakes. Failed validation retains the old loaded certificate. Restart is still needed for listener or TLS-minimum changes; recheck from a validating client.
 
 ## Example configuration safety
 

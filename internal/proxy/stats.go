@@ -7,16 +7,17 @@ import (
 )
 
 type Stats struct {
-	activeTCP   atomic.Int64
-	activeUDP   atomic.Int64
-	totalTCP    atomic.Uint64
-	totalUDP    atomic.Uint64
-	tcpRejected atomic.Uint64
-	bytesUp     atomic.Uint64
-	bytesDown   atomic.Uint64
-	udpUp       atomic.Uint64
-	udpDown     atomic.Uint64
-	udpDrops    atomic.Uint64
+	activeTCP    atomic.Int64
+	activeUDP    atomic.Int64
+	totalTCP     atomic.Uint64
+	totalUDP     atomic.Uint64
+	tcpRejected  atomic.Uint64
+	tcpFallbacks atomic.Uint64
+	bytesUp      atomic.Uint64
+	bytesDown    atomic.Uint64
+	udpUp        atomic.Uint64
+	udpDown      atomic.Uint64
+	udpDrops     atomic.Uint64
 
 	mu        sync.RWMutex
 	running   bool
@@ -34,6 +35,7 @@ type StatsSnapshot struct {
 	TotalTCP          uint64    `json:"total_tcp"`
 	TotalUDPSessions  uint64    `json:"total_udp_sessions"`
 	TCPRejected       uint64    `json:"tcp_rejected"`
+	TCPFallbacks      uint64    `json:"tcp_fallbacks"`
 	BytesUp           uint64    `json:"bytes_up"`
 	BytesDown         uint64    `json:"bytes_down"`
 	UDPPacketsUp      uint64    `json:"udp_packets_up"`
@@ -65,6 +67,7 @@ func (s *Stats) snapshot() StatsSnapshot {
 		TotalTCP:          s.totalTCP.Load(),
 		TotalUDPSessions:  s.totalUDP.Load(),
 		TCPRejected:       s.tcpRejected.Load(),
+		TCPFallbacks:      s.tcpFallbacks.Load(),
 		BytesUp:           s.bytesUp.Load(),
 		BytesDown:         s.bytesDown.Load(),
 		UDPPacketsUp:      s.udpUp.Load(),

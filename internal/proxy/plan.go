@@ -19,8 +19,9 @@ const (
 )
 
 type resolvedTarget struct {
-	host  string
-	addrs []netip.Addr
+	host      string
+	addrs     []netip.Addr
+	fetchedAt time.Time
 }
 
 type forwardingPlan struct {
@@ -60,6 +61,14 @@ func (m *Manager) buildPlan(rules []config.Rule, allowCachedDNS bool) forwarding
 		if err != nil {
 			plan.errors[rule.ID] = err
 			continue
+		}
+		if rule.BackupTargetHost != "" {
+			backup, backupErr := m.resolveHost(rule, rule.BackupTargetHost, rule.ID+":backup", allowCachedDNS)
+			if backupErr != nil {
+				plan.errors[rule.ID] = fmt.Errorf("backup target: %w", backupErr)
+				continue
+			}
+			rule.BackupTargetHost = backup[0].String()
 		}
 
 		hasNFT, hasGo := false, false
@@ -179,7 +188,11 @@ func (p *forwardingPlan) addGoPath(rule config.Rule, listenHost, targetHost neti
 }
 
 func (m *Manager) resolveTarget(rule config.Rule, allowCached bool) ([]netip.Addr, error) {
-	if address, err := netip.ParseAddr(rule.TargetHost); err == nil {
+	return m.resolveHost(rule, rule.TargetHost, rule.ID, allowCached)
+}
+
+func (m *Manager) resolveHost(rule config.Rule, host, cacheKey string, allowCached bool) ([]netip.Addr, error) {
+	if address, err := netip.ParseAddr(host); err == nil {
 		address = address.Unmap()
 		if err := config.ValidateTargetAddress(rule, address); err != nil {
 			return nil, err
@@ -188,28 +201,28 @@ func (m *Manager) resolveTarget(rule config.Rule, allowCached bool) ([]netip.Add
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rule.ConnectTimeoutSeconds)*time.Second)
 	defer cancel()
-	addresses, err := m.resolver.LookupNetIP(ctx, rule.TargetHost)
+	addresses, err := m.resolver.LookupNetIP(ctx, host)
 	if err != nil || len(addresses) == 0 {
-		if cached, ok := m.resolved[rule.ID]; allowCached && ok && cached.host == rule.TargetHost && len(cached.addrs) > 0 {
+		if cached, ok := m.resolved[cacheKey]; allowCached && ok && cached.host == host && len(cached.addrs) > 0 && !cached.fetchedAt.IsZero() && time.Since(cached.fetchedAt) <= time.Duration(rule.DNSCacheTTLSeconds)*time.Second {
 			for _, address := range cached.addrs {
 				if policyErr := config.ValidateTargetAddress(rule, address); policyErr != nil {
 					return nil, fmt.Errorf("cached target authorization failed: %w", policyErr)
 				}
 			}
-			m.logger.Warn("DNS refresh failed; retaining previous target", "rule", rule.Name, "target", rule.TargetHost, "error", err)
+			m.logger.Warn("DNS refresh failed; retaining previous target within configured cache validity", "rule", rule.Name, "target", host, "error", err)
 			return append([]netip.Addr(nil), cached.addrs...), nil
 		}
 		if err == nil {
 			err = fmt.Errorf("no addresses returned")
 		}
-		return nil, fmt.Errorf("resolve target %q: %w", rule.TargetHost, err)
+		return nil, fmt.Errorf("resolve target %q: %w", host, err)
 	}
 	unique := make(map[string]netip.Addr)
 	for _, address := range addresses {
 		address = address.Unmap()
 		if address.IsValid() {
 			if err := config.ValidateTargetAddress(rule, address); err != nil {
-				return nil, fmt.Errorf("resolve target %q: %w", rule.TargetHost, err)
+				return nil, fmt.Errorf("resolve target %q: %w", host, err)
 			}
 			unique[address.String()] = address
 		}
@@ -225,9 +238,9 @@ func (m *Manager) resolveTarget(rule config.Rule, allowCached bool) ([]netip.Add
 		return addresses[i].Less(addresses[j])
 	})
 	if len(addresses) == 0 {
-		return nil, fmt.Errorf("resolve target %q: no usable IP addresses returned", rule.TargetHost)
+		return nil, fmt.Errorf("resolve target %q: no usable IP addresses returned", host)
 	}
-	m.resolved[rule.ID] = resolvedTarget{host: rule.TargetHost, addrs: append([]netip.Addr(nil), addresses...)}
+	m.resolved[cacheKey] = resolvedTarget{host: host, addrs: append([]netip.Addr(nil), addresses...), fetchedAt: time.Now()}
 	return addresses, nil
 }
 
