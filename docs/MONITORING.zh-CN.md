@@ -26,7 +26,7 @@ sudo sysctl -w net.netfilter.nf_conntrack_acct=1
 
 ## Prometheus `/metrics`
 
-`GET /metrics` 共用管理 HTTPS 监听和直连来源 IP 白名单。管理员令牌或独立监控令牌均可访问；监控令牌可在 WebGUI“访问与安全”中创建、轮换和撤销，只能读取 `/metrics`、`/api/status` 及应用操作状态，不能读取配置或修改内容。日常抓取应使用受保护的监控令牌文件，不要复用管理员令牌。GET 不需要 CSRF。指标按规则 ID/协议标记，不输出规则名称或转发端点地址。
+`GET /metrics` 共用管理 HTTPS 监听和直连来源 IP 白名单。管理员令牌或独立监控令牌均可访问；监控令牌可在 WebGUI“访问与安全”中创建、轮换和撤销，只能读取 `/metrics`、`/api/status`、`/api/diagnostics` 及应用操作状态，不能读取配置或修改内容。日常抓取应使用受保护的监控令牌文件，不要复用管理员令牌。GET 不需要 CSRF。指标按规则 ID/协议标记，不输出规则名称或转发端点地址。
 
 ```yaml
 scrape_configs:

@@ -39,6 +39,7 @@ Try the [static WebUI demo](https://liying-official.github.io/Go-nftables-portbr
 | **Bilingual Web management** | Create, edit, enable, disable and delete rules, manage settings, rotate administrator/monitoring tokens and explicitly reload a validated certificate. UI assets ship with the application, with no external CDN dependency. |
 | **Status, monitoring and automation** | Inspect runtime state and traffic observations; use restricted read-only monitoring credentials, configuration revisions, application-operation status, rule-set validation/preview/batch replacement, authenticated Prometheus metrics and optional Go TCP backup/connect checks. A connect check is not application health. |
 | **Built-in management controls** | Native HTTPS, administrator tokens, IP/CIDR allowlisting and CSRF checks for API writes. |
+| **[Read-only diagnostics](docs/DIAGNOSTICS.en-US.md)** | Explain actual data planes, permission/DNS/firewall/listener failures and incomplete connection cleanup through WebGUI, API or `portbridge --diagnose`. |
 
 ## Install
 

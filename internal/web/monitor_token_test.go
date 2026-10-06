@@ -59,7 +59,7 @@ func TestMonitoringTokenIsReadOnlyAndRevocable(t *testing.T) {
 	if err := json.Unmarshal(firstResponse.Body.Bytes(), &first); err != nil || len(first.Token) != 64 {
 		t.Fatalf("invalid generated token: %v", err)
 	}
-	for _, path := range []string{"/api/status", "/metrics"} {
+	for _, path := range []string{"/api/status", "/api/diagnostics", "/metrics"} {
 		if got := request(http.MethodGet, path, first.Token).Code; got != http.StatusOK {
 			t.Fatalf("monitoring token %s = %d", path, got)
 		}

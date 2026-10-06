@@ -4,6 +4,7 @@ const {t,translateAPIError,hasMessageKey}=window.PB_I18N;
 let token='';try{token=sessionStorage.getItem('portbridge_demo_session')||'';}catch{}
 let csrf='',rules=[],timer=null,sessionEpoch=0,configRevision='';
 let polling=false;let statusRequest=null;
+let lastDiagnostics=null,diagnosticsRequest=null;
 let lastStatus=null,lastTLS=null,view='overview',newToken='',newMonitorToken='',monitorTokenConfigured=false,confirmation=null;
 const feedback={login:null,settings:null,rule:null,toast:null};
 const ruleModal=new tabler.Modal($('ruleDialog'));
@@ -47,6 +48,7 @@ function showTransportWarning(){const loopback=['localhost','127.0.0.1','::1','[
 function stopTimer(){polling=false;clearTimeout(timer);timer=null;}
 function startTimer(){stopTimer();polling=true;const poll=async()=>{await loadStatus();if(polling)timer=setTimeout(poll,500);};timer=setTimeout(poll,500);}
 function clearManagementView(){
+	lastDiagnostics=null;for(const id of ['diagnosticsSummary','diagnosticsEnvironment','diagnosticsFindings','diagnosticsRules'])$(id).textContent='';
   csrf='';rules=[];lastStatus=null;lastTLS=null;newToken='';newMonitorToken='';monitorTokenConfigured=false;configRevision='';
   $('uptime').textContent=t('uptimeEmpty');for(const id of ['ruleCount','runningCount','activeTCP','activeUDP'])$(id).textContent='0';$('bytesUp').textContent='0 B';$('bytesDown').textContent='0 B';renderRules([]);
   for(const id of ['autoACL','whiteACL','bootstrapACL'])renderChips(id,[]);
@@ -106,7 +108,24 @@ function syncStrictUI(){const strict=$('strictAllowlist').checked;if(strict)$('a
 function renderTLS(info){const cert=info?.certificate;$('selfSignedWarning').classList.toggle('hidden',!cert?.enabled||!cert.self_signed);$('certificateStatus').textContent=cert?.enabled?t(cert.self_signed?'certificateSelf':'certificateOther')+' SHA-256: '+cert.sha256+' · '+t('certificateExpiry',{date:new Date(cert.not_after).toLocaleString(window.PB_I18N.language())}):t('certificateNone');}
 function renderNewToken(){$('tokenResult').textContent=newToken?t('newToken')+' '+newToken:'';$('tokenResult').classList.toggle('hidden',!newToken);}
 function renderMonitorToken(){$('monitorTokenStatus').textContent=t(monitorTokenConfigured?'monitorTokenActive':'monitorTokenInactive');$('revokeMonitorTokenBtn').disabled=!monitorTokenConfigured;$('monitorTokenResult').textContent=newMonitorToken?t('newToken')+' '+newMonitorToken:'';$('monitorTokenResult').classList.toggle('hidden',!newMonitorToken);}
-function setView(next){if(!['overview','rules','access'].includes(next))return;const changed=view!==next;view=next;const key=next==='overview'?'dashboard':next;$('pageTitle').dataset.i18n=key;$('pageHint').dataset.i18n=key+'Hint';$('pageTitle').textContent=t(key);$('pageHint').textContent=t(key+'Hint');for(const panel of document.querySelectorAll('[data-page]'))panel.hidden=!panel.dataset.page.split(' ').includes(next);for(const link of document.querySelectorAll('.pb-nav [data-nav]')){link.classList.toggle('active',link.dataset.nav===next);if(link.dataset.nav===next)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}closeNavigation();if(changed){document.documentElement.scrollTop=0;document.body.scrollTop=0;}}
+function setView(next){if(!['overview','rules','access','diagnostics'].includes(next))return;const changed=view!==next;view=next;const key=next==='overview'?'dashboard':next;$('pageTitle').dataset.i18n=key;$('pageHint').dataset.i18n=key+'Hint';$('pageTitle').textContent=t(key);$('pageHint').textContent=t(key+'Hint');for(const panel of document.querySelectorAll('[data-page]'))panel.hidden=!panel.dataset.page.split(' ').includes(next);for(const link of document.querySelectorAll('.pb-nav [data-nav]')){link.classList.toggle('active',link.dataset.nav===next);if(link.dataset.nav===next)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}closeNavigation();if(changed){document.documentElement.scrollTop=0;document.body.scrollTop=0;}if(next==='diagnostics'&&token&&(changed||!lastDiagnostics))loadDiagnostics();}
+
+async function loadDiagnostics(){
+  if(diagnosticsRequest)return diagnosticsRequest;
+  const epoch=sessionEpoch;$('refreshDiagnosticsBtn').disabled=true;$('diagnosticsSummary').textContent=t('diagLoading');
+  diagnosticsRequest=(async()=>{try{const report=await api('/api/diagnostics');if(!token||epoch!==sessionEpoch)return;lastDiagnostics=report;renderDiagnostics();}catch(error){if(token&&epoch===sessionEpoch)$('diagnosticsSummary').textContent=error.messageKey?t(error.messageKey,error.messageArgs):translateAPIError(error.message);}})();
+  try{return await diagnosticsRequest;}finally{diagnosticsRequest=null;$('refreshDiagnosticsBtn').disabled=false;}
+}
+function diagnosticText(value){return value?.[window.PB_I18N.language()]||value?.['en-US']||'';}
+function diagnosticFindings(items){return (items||[]).map(item=>`<div class="pb-diagnostic-finding"><span class="badge ${item.severity==='error'?'bg-red-lt':item.severity==='warning'?'bg-yellow-lt':'bg-blue-lt'}">${esc(t('diagSeverity_'+item.severity))}</span> <strong>${esc(diagnosticText(item.summary))}</strong><p>${esc(diagnosticText(item.advice))}</p>${item.evidence?`<p class="pb-help">${esc(item.evidence)}</p>`:''}</div>`).join('');}
+function renderDiagnostics(){
+  if(!lastDiagnostics)return;const report=lastDiagnostics,env=report.environment||{};
+  $('diagnosticsSummary').textContent=t('diagSnapshot',{time:new Date(report.generated_at).toLocaleString(window.PB_I18N.language()),source:report.source});
+  const facts=[['diagContext',env.context],['diagOS',env.os],['CAP_NET_ADMIN',t('diagValue_'+env.cap_net_admin)],['CAP_NET_BIND_SERVICE',t('diagValue_'+env.cap_net_bind_service)],['diagNFTTool',t(env.trusted_nft_available?'diagValue_present':'diagValue_absent')],['diagConntrackTool',t(env.trusted_conntrack_available?'diagValue_present':'diagValue_absent')],['diagAccounting',t('diagValue_'+env.conntrack_accounting)],['diagRuntime',t(report.runtime_observed?'diagYes':'diagNo')],['diagBusiness',t('diagNotChecked')],['diagRevision',report.config_revision||'—']];
+  $('diagnosticsEnvironment').innerHTML=`<dl class="pb-diagnostic-facts">${facts.map(([key,value])=>`<div><dt>${esc(key.startsWith('CAP_')?key:t(key))}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>`;
+  $('diagnosticsFindings').innerHTML=diagnosticFindings([...(report.findings||[]),...(env.findings||[])])+ (report.latest_operation?`<div class="pb-diagnostic-finding"><p>${esc(t('diagLastOperation'))}: <code>${esc(report.latest_operation.id)}</code> · ${esc(report.latest_operation.state)}<br>${esc(t('diagRevision'))}: <code>${esc(report.latest_operation.config_revision)}</code></p><p class="pb-help">${esc(t('diagRecordedOnly'))}</p></div>`:'');
+  $('diagnosticsRules').innerHTML=(report.rules||[]).length?(report.rules||[]).map(rule=>`<article class="card"><div class="card-body"><h3 class="card-title">${esc(rule.name||rule.id)} <span class="badge pb-badge">${esc(t('diagState_'+rule.state))}</span></h3><dl class="pb-diagnostic-facts"><div><dt>${esc(t('diagDesired'))}</dt><dd>${esc(t('diagDesired_'+rule.desired))}</dd></div><div><dt>${esc(t('diagRequested'))}</dt><dd>${esc(rule.requested_data_plane||'—')}</dd></div><div><dt>${esc(t('diagActual'))}</dt><dd>${esc(t('diagPlane_'+rule.actual_data_plane))}</dd></div><div><dt>${esc(t('diagKernel'))}</dt><dd><code>${esc(rule.kernel_state)}</code></dd></div><div><dt>${esc(t('diagGo'))}</dt><dd>${esc(t(rule.go_running?'diagValue_present':'diagValue_absent'))}</dd></div></dl>${diagnosticFindings(rule.findings)}${rule.evidence?`<details><summary>${esc(t('diagEvidence'))}</summary><pre class="pb-diagnostic-evidence">${esc(rule.evidence)}</pre></details>`:''}</div></article>`).join(''):`<div class="card"><p class="card-body mb-0">${esc(t('diagNoRules'))}</p></div>`;
+}
 function closeNavigation(){const wasOpen=document.body.classList.contains('pb-nav-open');document.body.classList.remove('pb-nav-open');$('navBackdrop').hidden=true;$('openNav').setAttribute('aria-expanded','false');$('sidebar').inert=mobileNavigation.matches;if(mobileNavigation.matches)$('sidebar').setAttribute('aria-hidden','true');else $('sidebar').removeAttribute('aria-hidden');if(wasOpen&&$('sidebar').contains(document.activeElement))$('openNav').focus();}
 function askConfirmation(title,body,args={}){dismissConfirmation(false);return new Promise(resolve=>{confirmation={title,body,args,resolve};$('confirmTitle').textContent=t(title,args);$('confirmBody').textContent=t(body,args);confirmModal.show();});}
 function dismissConfirmation(accepted){const pending=confirmation;confirmation=null;confirmModal.hide();if(pending)pending.resolve(accepted);}
@@ -125,6 +144,7 @@ async function deleteRule(id){const r=rules.find(x=>x.id===id),epoch=sessionEpoc
 
 $('loginForm').addEventListener('submit',async event=>{event.preventDefault();if(event.currentTarget.dataset.busy==='true')return;setBusy($('loginForm'),true);token=$('tokenInput').value.trim();sessionEpoch++;try{await establishSession();saveSession();$('tokenInput').value='';hideLogin();startTimer();}catch(error){token='';saveSession();showLogin();showError('login',error);}finally{setBusy($('loginForm'),false);}});
 $('logoutBtn').onclick=()=>{token='';sessionEpoch++;saveSession();showLogin();};
+$('refreshDiagnosticsBtn').onclick=loadDiagnostics;
 $('strictAllowlist').addEventListener('change',syncStrictUI);
 $('settingsForm').addEventListener('submit',async event=>{
   event.preventDefault();if(event.currentTarget.dataset.busy==='true')return;setBusy($('settingsForm'),true);feedback.settings=null;renderFeedback();const epoch=sessionEpoch;
@@ -145,7 +165,7 @@ for(const link of document.querySelectorAll('[data-nav]'))link.addEventListener(
 $('openNav').onclick=()=>{document.body.classList.add('pb-nav-open');$('sidebar').inert=false;$('sidebar').removeAttribute('aria-hidden');$('navBackdrop').hidden=false;$('openNav').setAttribute('aria-expanded','true');};$('closeNav').onclick=closeNavigation;$('navBackdrop').onclick=closeNavigation;mobileNavigation.addEventListener('change',closeNavigation);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeNavigation();});
 $('confirmAccept').onclick=()=>dismissConfirmation(true);$('confirmDialog').addEventListener('hidden.bs.modal',()=>{if(confirmation){const pending=confirmation;confirmation=null;pending.resolve(false);}});
-document.addEventListener('portbridge:language',()=>{setView(view);if(lastStatus&&token)renderStatus(lastStatus);else $('uptime').textContent=t('uptimeEmpty');renderTLS(lastTLS);renderFeedback();renderNewToken();renderMonitorToken();if(confirmation){$('confirmTitle').textContent=t(confirmation.title,confirmation.args);$('confirmBody').textContent=t(confirmation.body,confirmation.args);}});
+document.addEventListener('portbridge:language',()=>{setView(view);if(lastStatus&&token)renderStatus(lastStatus);else $('uptime').textContent=t('uptimeEmpty');renderDiagnostics();renderTLS(lastTLS);renderFeedback();renderNewToken();renderMonitorToken();if(confirmation){$('confirmTitle').textContent=t(confirmation.title,confirmation.args);$('confirmBody').textContent=t(confirmation.body,confirmation.args);}});
 
 function endpoint(host,port,end){const ports=end&&end!==port?`${port}-${end}`:`${port}`;return host.includes(':')?`[${host}]:${ports}`:`${host}:${ports}`;}
 function duration(value){const seconds=Math.max(0,Number(value)||0),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return days?t('daysHours',{days,hours}):hours?t('hoursMinutes',{hours,minutes}):t('minutes',{minutes});}

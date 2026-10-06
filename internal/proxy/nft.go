@@ -165,6 +165,18 @@ func nftOwnerMarker(mark uint32) string {
 	return fmt.Sprintf("%s:%08x", nftOwnerPrefix, mark)
 }
 
+// DiagnosticNFTDependencies only inspects the same fixed trusted tool paths as
+// the backend. It never starts a subprocess or creates recovery state.
+func DiagnosticNFTDependencies() (nft, conntrack bool) {
+	for _, path := range []string{"/usr/sbin/nft", "/usr/bin/nft"} {
+		nft = nft || trustedRootExecutable(path)
+	}
+	for _, path := range []string{"/usr/sbin/conntrack", "/usr/bin/conntrack"} {
+		conntrack = conntrack || trustedRootExecutable(path)
+	}
+	return nft, conntrack
+}
+
 func trustedRootExecutable(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || info.Mode().Perm()&0o111 == 0 {

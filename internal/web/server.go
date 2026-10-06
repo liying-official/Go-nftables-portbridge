@@ -187,6 +187,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /static/security.css", s.serveStatic("static/security.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /api/bootstrap", s.requireAuth(s.handleBootstrap))
 	mux.HandleFunc("GET /api/status", s.requireReadAuth(s.handleStatus))
+	mux.HandleFunc("GET /api/diagnostics", s.requireReadAuth(s.handleDiagnostics))
 	mux.HandleFunc("GET /api/operations/latest", s.requireReadAuth(s.handleLatestOperation))
 	mux.HandleFunc("GET /api/operations/{id}", s.requireReadAuth(s.handleOperation))
 	mux.HandleFunc("GET /metrics", s.requireReadAuth(s.handleMetrics))

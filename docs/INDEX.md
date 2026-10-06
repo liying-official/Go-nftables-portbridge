@@ -14,6 +14,7 @@ Documentation for v2.5.0. Use the guides matching the version you install. / 本
 | Interactive fresh installer / 交互式全新安装 | [One-click](ONECLICK.en-US.md) | [一键安装](ONECLICK.zh-CN.md) |
 | HTTP API and client examples / HTTP API 与客户端示例 | [API](API.en-US.md) | [API](API.zh-CN.md) |
 | Statistics and Prometheus / 流量统计与指标 | [Monitoring](MONITORING.en-US.md) | [监控](MONITORING.zh-CN.md) |
+| Read-only environment and application diagnosis / 只读环境与应用诊断 | [Diagnostics](DIAGNOSTICS.en-US.md) | [诊断](DIAGNOSTICS.zh-CN.md) |
 | Version scope / 版本说明 | [Release notes](../RELEASE_NOTES.md) | [版本说明](../RELEASE_NOTES.zh-CN.md) |
 
 ## Shared bilingual references / 共用双语文档

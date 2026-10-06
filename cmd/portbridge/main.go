@@ -38,6 +38,8 @@ type commandOptions struct {
 	bootstrap                                       stringList
 	prepareTLS, httpsInfo, httpsCheck, requireHTTPS bool
 	httpsOpts                                       httpsOptions
+	diagnose, diagnoseJSON                          bool
+	diagnoseLanguage                                string
 }
 
 func parseOptions() commandOptions {
@@ -46,6 +48,9 @@ func parseOptions() commandOptions {
 	flag.StringVar(&options.tokenPath, "token-file", "/etc/portbridge/admin.token", "file containing the generated admin token")
 	flag.StringVar(&options.logLevel, "log-level", "info", "debug, info, warn, or error")
 	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&options.diagnose, "diagnose", false, "read-only environment and application diagnosis; never applies configuration")
+	flag.BoolVar(&options.diagnoseJSON, "diagnose-json", false, "print read-only diagnostic JSON (implies --diagnose)")
+	flag.StringVar(&options.diagnoseLanguage, "diagnose-language", "en-US", "diagnostic text language: en-US or zh-CN")
 	flag.BoolVar(&options.resetToken, "reset-admin-token", false, "generate a new admin token and exit")
 	flag.BoolVar(&options.cleanupNFT, "cleanup-nft", false, "remove this application's owned nftables table and exit")
 	flag.StringVar(&options.validateBootstrap, "validate-bootstrap-allow", "", "validate a comma-separated bootstrap IP/CIDR list and exit")
@@ -73,6 +78,13 @@ func main() {
 	if err := rejectPositionalArgs(flag.Args()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+	if options.diagnose || options.diagnoseJSON {
+		if err := runDiagnosis(options, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
 	}
 	if showVersion {
 		fmt.Println(version)

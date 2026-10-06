@@ -193,3 +193,10 @@ a { color:var(--pb-ink) }
   .pb-footer { font-size:.63rem }
 }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important;transition:none!important;animation:none!important } }
+.pb-diagnostic-rules { display:grid; gap:1rem; margin-top:1rem }
+.pb-diagnostic-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.75rem; margin:1rem 0 }
+.pb-diagnostic-facts dt { color:var(--pb-muted); font-size:.8rem }
+.pb-diagnostic-facts dd { margin:0; overflow-wrap:anywhere }
+.pb-diagnostic-finding { padding:.75rem 0; border-top:1px solid #e4edf1 }
+.pb-diagnostic-finding p { margin:.35rem 0 0; overflow-wrap:anywhere }
+.pb-diagnostic-evidence { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:.5rem }

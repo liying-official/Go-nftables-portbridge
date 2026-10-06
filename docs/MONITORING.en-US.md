@@ -26,7 +26,7 @@ This setting adds accounting overhead and normally affects newly created connect
 
 ## Prometheus `/metrics`
 
-`GET /metrics` shares the management HTTPS listener and direct-source IP allowlist. It accepts the administrator token or a separate monitoring token, created/rotated/revoked in WebGUI Access & security. The monitoring token can read only `/metrics`, `/api/status` and application-operation status; it cannot read configuration or write anything. Store the monitoring token in a protected scraper credential file; do not reuse the administrator token for routine scraping. GET does not require CSRF. Metrics label rules by ID/protocol, not names or forwarding endpoint addresses.
+`GET /metrics` shares the management HTTPS listener and direct-source IP allowlist. It accepts the administrator token or a separate monitoring token, created/rotated/revoked in WebGUI Access & security. The monitoring token can read only `/metrics`, `/api/status`, `/api/diagnostics` and application-operation status; it cannot read configuration or write anything. Store the monitoring token in a protected scraper credential file; do not reuse the administrator token for routine scraping. GET does not require CSRF. Metrics label rules by ID/protocol, not names or forwarding endpoint addresses.
 
 ```yaml
 scrape_configs:

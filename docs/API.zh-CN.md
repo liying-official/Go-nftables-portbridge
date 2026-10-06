@@ -9,7 +9,7 @@
 **语言：** [English](API.en-US.md) | **简体中文**  
 
 > [!IMPORTANT]
-> 读取配置与管理写操作要求管理员 Bearer Token；独立监控令牌只能读取状态、应用操作状态和指标。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
+> 读取配置与管理写操作要求管理员 Bearer Token；独立监控令牌只能读取状态、只读诊断、应用操作状态和指标。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
 
 本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.5.0 实现为准。
 
@@ -35,19 +35,21 @@
 - [16. 当前 API 不提供的能力](#16-当前-api-不提供的能力)
 - [17. Prometheus 指标](#17-prometheus-指标)
 - [18. 监控凭据与配置操作](#18-监控凭据与配置操作)
+- [19. 只读诊断](#19-只读诊断)
 - [实现依据与源码链接](#实现依据与源码链接)
 
 ---
 
 ## 1. 接口范围与速查
 
-当前版本显式注册 **17 个 JSON 管理 API 路由**，统一以 `/api/` 开头；另提供受保护的 `GET /metrics` Prometheus 接口，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
+当前版本显式注册 **18 个 JSON 管理 API 路由**，统一以 `/api/` 开头；另提供受保护的 `GET /metrics` Prometheus 接口，没有 `/api/v1/` 版本前缀。管理接口与 WebGUI 共用监听地址、端口、TLS 和 IP ACL。[^routes]
 
 | 方法 | 路径 | 作用 | 成功状态 | CSRF | 请求 JSON |
 |---|---|---|---:|---|---|
 | `GET` | `/api/bootstrap` | 获取进程级 CSRF 值及项目名 | `200` | 不需要 | 无 |
 | `GET` | `/api/config` | 获取可公开给管理员的配置投影 | `200` | 不需要 | 无 |
 | `GET` | `/api/status` | 获取运行状态、计数器及有效管理 ACL | `200` | 不需要 | 无 |
+| `GET` | `/api/diagnostics` | 只读解释环境与应用状态，不应用变更 | `200` | 不需要 | 无 |
 | `PUT` | `/api/settings` | 保存管理面设置 | `200` | 必须 | `settingsRequest` |
 | `POST` | `/api/token/rotate` | 生成并立即启用新管理员令牌 | `200` | 必须 | 无 |
 | `POST` | `/api/rules` | 创建一条规则 | `201` | 必须 | `Rule` |
@@ -60,7 +62,7 @@
 | `PUT` | `/api/rules` | 原子保存完整规则集，然后应用 | `200` | 必须 | `{ "rules": [...] }` |
 | `GET` | `/api/rules/template` | 导出不含实例 ID 和凭据的可迁移规则模板 | `200` | 不需要 | 无 |
 
-全部路由都要求 Bearer Token。只有 `/api/status`、`/api/operations/latest`、`/api/operations/{id}` 和 `/metrics` 接受独立只读监控令牌；其余路由要求管理员令牌。`/api/bootstrap` 不是匿名接口。当前没有用户账号、通用角色或按规则授权。[^auth]
+全部路由都要求 Bearer Token。只有 `/api/status`、`/api/diagnostics`、`/api/operations/latest`、`/api/operations/{id}` 和 `/metrics` 接受独立只读监控令牌；其余路由要求管理员令牌。`/api/bootstrap` 不是匿名接口。当前没有用户账号、通用角色或按规则授权。[^auth]
 
 需要读取规则列表时，使用 `/api/config` 的 `rules`，或 `/api/status` 的 `rules[].rule`。当前**没有** `GET /api/rules` 或 `GET /api/rules/{id}`；未注册的读取路径返回 `404`，不要根据 POST 路径自行推导读取接口。[^routes]
 
@@ -112,7 +114,7 @@ ACL 根据 TCP 直接对端地址判断，不读取 `X-Forwarded-For`、`X-Real-
 Authorization: Bearer <64-character-admin-token>
 ```
 
-程序生成的管理员与监控令牌均来自 32 字节随机数据，以 64 个十六进制字符编码。服务器保存并比对令牌字符串的 SHA-256；不要把任一种哈希值当作令牌发送。监控令牌仅能访问第 18 节列出的四个读取接口。[^token-storage]
+程序生成的管理员与监控令牌均来自 32 字节随机数据，以 64 个十六进制字符编码。服务器保存并比对令牌字符串的 SHA-256；不要把任一种哈希值当作令牌发送。监控令牌仅能访问第 18 节列出的五个读取接口。[^token-storage]
 
 | 项目 | 当前行为 |
 |---|---|
@@ -1372,7 +1374,7 @@ Store 内部对更新加锁并原子替换配置文件。`GET /api/config` 暴�
 
 ## 18. 监控凭据与配置操作
 
-`POST /api/monitor-token/rotate` 创建或替换独立的 64 字符监控令牌，响应 `{ "token": "..." }`，明文**只显示一次**。`DELETE /api/monitor-token` 撤销令牌（`204`）。两者均要求管理员 Bearer、CSRF 及原有管理 ACL/TLS；`/api/config.monitor_token_configured` 只报告是否已配置，不返回明文或哈希。监控令牌仅能读取 `GET /api/status`、`GET /api/operations/latest`、`GET /api/operations/{id}` 与 `GET /metrics`；不能取得 CSRF、读取配置或写入。应妥善保存，泄露时及时轮换。
+`POST /api/monitor-token/rotate` 创建或替换独立的 64 字符监控令牌，响应 `{ "token": "..." }`，明文**只显示一次**。`DELETE /api/monitor-token` 撤销令牌（`204`）。两者均要求管理员 Bearer、CSRF 及原有管理 ACL/TLS；`/api/config.monitor_token_configured` 只报告是否已配置，不返回明文或哈希。监控令牌仅能读取 `GET /api/status`、`GET /api/diagnostics`、`GET /api/operations/latest`、`GET /api/operations/{id}` 与 `GET /metrics`；不能取得 CSRF、读取配置或写入。应妥善保存，泄露时及时轮换。
 
 `GET /api/config` 返回 `config_revision`，并以带双引号的相同值作为 `ETag` 响应头。这是已保存配置的 SHA-256 不透明修订值，**不是**软件版本号或凭据。写请求可发送 `If-Match: "<config_revision>"`，旧版本会收到 `412`；单条规则和设置接口为兼容旧客户端仍允许省略，但 `PUT /api/rules` **必须**提供（缺失返回 `428`）。遇到 `412` 应重新读取配置后审查变更；令牌轮换也会改变修订值。`PUT /api/settings` 返回新修订值；规则写入通过 `X-PortBridge-Config-Revision`、`X-PortBridge-Operation-ID`、`X-PortBridge-Application-State` 响应头返回，同时保留原有响应体和状态码。
 
@@ -1383,6 +1385,14 @@ Store 内部对更新加锁并原子替换配置文件。`GET /api/config` 暴�
 应用操作包含 `id`、`config_revision`、`state`、`rules[]`、`business_health:"not_checked"`、`saved_at`，完成时还有 `completed_at`。状态依次为 `saved` → `applying` → `applied`，异常时为 `application_failed` 或 `cleanup_pending`。逐规则观察包括 `desired`、`kernel_state`、`go_running` 和可选 `manager_error`。可轮询 `GET /api/operations/{id}` 或查看 `GET /api/status.latest_operation`；`applied` 表示管理器观察到控制面期望状态，**不是**端到端业务可用。`cleanup_pending` 表示旧内核转发或连接撤销尚不能确认。只在进程内保留最近 64 个操作，重启即清空；`404` 可能表示 ID 未知或已淘汰。仍须分别检查运行态和实际业务连通性。
 
 `POST /api/tls/reload` 要求管理员 Bearer 和 CSRF。它先校验服务器本地证书/私钥及当前有效期，再原子地将证书用于**新的** TLS 握手；已有会话保持协商时的 TLS 状态。校验失败不会替换已加载证书。它不会签发/续期证书，也不会更改监听、最低 TLS 策略、ACL 或凭据；这些配置变化仍可能要求重启。证书到期指标见 `/metrics` 和 WebGUI。
+
+## 19. 只读诊断
+
+`GET /api/diagnostics` 成功返回 `200` JSON，包含 `generated_at`、`source`、`read_only:true`、`runtime_observed`、`business_health:"not_checked"`、`config_revision`、`environment`、`findings`、`rules` 及可选 `latest_operation`。接受管理员和监控 Bearer 令牌，沿用 HTTPS/直接来源白名单，无需 CSRF。其他方法不是诊断操作。
+
+每条规则包含 `id`、`name`、`desired`、`requested_data_plane`、`actual_data_plane`、`kernel_state`、`go_running`、`state`、`findings` 和可选记录的 `evidence`。实际数据面包括 `nftables`、`go-proxy`、`hybrid`、`none`、`not_observed`、`kernel-unverified`、`go-and-unverified-kernel`；状态包括 `applied`、`applying`、`disabled`、`application_failed`、`cleanup_pending`、`suspended`、`unverified`、`not_observed`。`applying` 表示已保存的转发参数与观察结果不同，不表示应用完成；清理或不确定状态优先显示。诊断项包含稳定 `code`、`severity` 和双语 `summary`/`advice`（`en-US`、`zh-CN`）。内核路径存在不代表业务健康；删除后未完成清理的运行态记录仍会显示。最近操作是历史记录，不是新执行的应用。
+
+接口只读取进程环境和已有控制器观察，不运行 nft/conntrack 命令，不应用/清理规则，不解析目标、不绑定端口、不修改 sysctl、不绕过归属检查。受限内核文件可能显示 `unknown`。报告不输出凭据或私钥路径；记录的规则错误可能包含端点，分享前须审查。[诊断说明](DIAGNOSTICS.zh-CN.md)列出命令用法与诊断代码。
 
 ## 实现依据与源码链接
 
