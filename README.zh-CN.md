@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/liying-official/Go-nftables-portbridge/releases"><img src="https://img.shields.io/github/v/release/liying-official/Go-nftables-portbridge" alt="GitHub Release"></a>
+  <a href="https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.1"><img src="https://img.shields.io/badge/Release-v2.5.1-blue" alt="GitHub Release v2.5.1"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Platform: Linux">
   <img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-informational" alt="Architecture: amd64 / arm64">
