@@ -29,7 +29,7 @@ For direct public TLS:
 - then, from HTTPS, disable automatic LAN ACL, whitelist the current direct peer, and enable `strict_ip_allowlist`;
 - use a narrow `/32` or `/128` where possible and never use documentation example addresses unchanged.
 
-Strict mode requires native TLS, ignores automatic LAN prefixes and `--bootstrap-allow`, rejects all-address `/0` prefixes, and retains loopback access for local recovery. Disallowed direct peers are closed before TLS/HTTP parsing and are checked again by middleware. TLS 1.2 is the minimum by default; internet-exposed management can set `web.tls_min_version` to `1.3` for a TLS 1.3-only policy (restart required). Private-key permissions are limited to owner read/write plus optional group read (normally `0600`, or `0640 root:portbridge`). Certificate renewal requires a service restart.
+Strict mode requires native TLS, ignores automatic LAN prefixes and `--bootstrap-allow`, rejects all-address `/0` prefixes, and retains loopback access for local recovery. Disallowed direct peers are closed before TLS/HTTP parsing and are checked again by middleware. TLS 1.2 is the minimum by default; internet-exposed management can set `web.tls_min_version` to `1.3` for a TLS 1.3-only policy (restart required). Private-key permissions are limited to owner read/write plus optional group read (normally `0600`, or `0640 root:portbridge`). After external certificate renewal, use authenticated validated reload or restart.
 
 PortBridge deliberately ignores `Forwarded` and `X-Forwarded-For`. Behind a reverse proxy, it sees only the proxy as the TCP peer; use HTTPS to the backend, verify its certificate/hostname, bind it to loopback/private addresses, and enforce the real-client ACL, TLS, request limits, and anti-DoS controls at the proxy/firewall. Never whitelist an untrusted shared proxy and assume PortBridge can recover the original client IP.
 
@@ -37,7 +37,7 @@ The application has bounded header/body sizes, read/write timeouts, an accepted-
 
 The management ACL does not restrict forwarding rules. Each configured TCP/UDP listen endpoint has its own exposure and must be protected separately when it is not intended to be public.
 
-`GET /metrics` uses the same management ACL, HTTPS and administrator Bearer token. Scraper credentials grant full management access, not read-only access; protect the scraper and its token file. Metrics expose rule IDs/protocols but omit rule names and forwarding endpoints.
+`GET /metrics` uses the same management ACL and HTTPS, accepting administrator or independent monitoring Bearer tokens. Prefer the read-only monitoring token for scrapers; it cannot read configuration, export templates or perform writes. Administrator credentials still grant full management access. Protect the scraper and its token file, and rotate or revoke the monitoring token in WebGUI when needed. Metrics expose rule IDs/protocols but omit rule names and forwarding endpoints.
 
 ## Credentials, files, and logs
 
@@ -73,7 +73,7 @@ The signing identity is `portbridge-release-v2` and the namespace is `portbridge
 
 Source-only development defaults can use loopback HTTP before preparation; the installed-service HTTPS policy above does not apply automatically to every direct `go run` or local binary invocation. A normal manual installation is loopback-only. The interactive installer opens available wildcard management listeners behind a strict allowlist; its local checks confirm saved policy and loopback access, not external positive/negative ACL tests.
 
-Certificate dates are checked during HTTPS preflight/preparation and settings validation, not by the listener TLS loader itself. There is no automatic renewal or hot reload, and a running listener can retain a certificate after expiry. Monitor dates, replace material safely, restart and verify from a validating client. `enabled` and `self_signed` metadata are not a trust or freshness guarantee.
+Certificate dates are checked during HTTPS preflight/preparation, settings validation and explicit certificate reload, not by the listener TLS loader itself. Renewal and reload are not automatic, and a running listener can retain a certificate after expiry. Monitor expiry metrics, replace server-local material safely, then invoke the administrator/CSRF-protected WebGUI reload action or `POST /api/tls/reload`, or restart. Successful reload changes new TLS handshakes; failed validation preserves the loaded certificate. Listener and TLS-minimum changes still require restart. Verify from a validating client; `enabled` and `self_signed` metadata are not a trust or freshness guarantee.
 
 Privacy review must distinguish real deployment data from reserved examples, loopback/wildcard semantics, explicit denied-target ranges and public signature-verification material. User-selected rule IDs may also carry identifying information even when endpoint labels are omitted from metrics. See [publication checklist](docs/PUBLISHING.md). Do not treat a scan of this snapshot as a guarantee about future commits, Git history or private runtime files.
 
@@ -87,7 +87,7 @@ v2.5.1 支持逐规则 default-drop 选择性 ACL 有界证明，不解释任意
 
 PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也使用 HTTPS 并验证证书/主机名，后端只监听回环/私网，并由代理和防火墙根据真实客户端执行 TLS、白名单、限流与抗 DoS；应用看到的直连来源只是代理。管理 ACL 只保护管理页面，不会限制每条转发规则的对外暴露。
 
-`GET /metrics` 同样要求管理 ACL、HTTPS 和管理员 Bearer 认证。抓取凭据仍拥有完整管理权限，并非只读令牌，须保护抓取主机及凭据文件。指标暴露规则 ID/协议，但不输出规则名或转发端点。
+`GET /metrics` 同样要求管理 ACL 和 HTTPS，接受管理员或独立监控 Bearer 令牌。抓取程序应优先使用只读监控令牌；该令牌不能读取配置、导出模板或执行写操作。管理员凭据仍拥有完整管理权限。应保护抓取主机及凭据文件，并可在 WebGUI 轮换或撤销监控令牌。指标暴露规则 ID/协议，但不输出规则名或转发端点。
 
 管理令牌为 256 位并拥有完整管理权限，Web 仅将其放在当前标签页的 `sessionStorage`。发布包安装器仅在指定 `--show-token` 时输出令牌，一键安装脚本在成功后显示令牌；也可在本机读取 `/etc/portbridge/admin.token`，怀疑泄露后立即轮换。debug/error 日志可能包含客户端、目标、域名与规则详情，分享前必须脱敏。
 
@@ -108,6 +108,6 @@ v2.5.1 发布流程打包 amd64/arm64 × 中英双语四个 Linux 预编译归�
 
 未经 HTTPS 准备的源码开发配置可在回环上使用 HTTP，不能把安装后策略套用于每次直接运行二进制。手动安装默认仅回环；交互式安装会在严格白名单后开放可用的通配监听。后者的本机自检不等于外部允许/拒绝来源测试。
 
-证书日期检查发生在 HTTPS 预检、准备和设置校验阶段，监听器加载器本身不做日期拒绝，也不自动续期或热重载。运行进程可继续持有过期证书，应主动监控、替换并重启，再从验证证书的客户端复查。证书状态字段不等于信任或实时有效性保证。
+证书日期检查发生在 HTTPS 预检、准备、设置校验和显式证书重载阶段，监听器加载器本身不做日期拒绝。续期与重载均不自动执行，运行进程可继续持有过期证书。应监控到期指标，安全替换服务器本地材料，再通过要求管理员令牌与 CSRF 的 WebGUI 重载按钮或 `POST /api/tls/reload` 重载，也可重启服务。成功重载仅作用于新 TLS 握手，校验失败保留已加载证书；监听与最低 TLS 策略变化仍需重启。应从正常验证证书的客户端复查，证书状态字段不等于信任或实时有效性保证。
 
 仓库启用了 GitHub 私密漏洞报告时优先使用该入口；源码归档不能证明入口已经开启。没有私密渠道时，可仅询问私密联系方式，不在公开 Issue 披露漏洞细节。隐私审查应区分真实部署数据、保留示例地址、回环/通配地址语义、拒绝目标范围与公开验签材料。规则 ID 也可能由用户写入识别信息。当前快照扫描不覆盖历史提交或未来运行文件，详见[发布检查表](docs/PUBLISHING.md)。
