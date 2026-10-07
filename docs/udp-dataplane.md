@@ -1,4 +1,4 @@
-# Go-nftables-portbridge v2.5.0 — UDP dataplane / UDP 数据面
+# Go-nftables-portbridge v2.5.1 — UDP dataplane / UDP 数据面
 
 ## English
 
@@ -27,7 +27,7 @@ Batch syscall failures may return `-1` with an error. The worker preserves that 
 
 ### Defaults and capacity boundaries
 
-| Setting | v2.5.0 default |
+| Setting | v2.5.1 default |
 |---|---|
 | Automatic rule worker budget | `min(GOMAXPROCS, 16)`; each listener endpoint still needs at least one worker |
 | Batch size | `64` messages |
@@ -59,11 +59,11 @@ The Go dataplane does not implement UDP GRO/GSO enablement or expose a switch fo
 
 Check NIC RX/TX queues, RSS distribution, IRQ/CPU/NUMA placement and socket/softnet/NIC drop counters first. RPS/XPS and CPU affinity need workload-specific validation; the program does not pin every worker with `LockOSThread` by default.
 
-nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.5.0.
+nftables/flowtable integrates naturally with same-family NAT. Go batch forwarding supports cross-family paths with moderate implementation cost. XDP/eBPF, AF_XDP and DPDK can provide lower-level processing but require substantially more work on state, routing/neighbours, queues, memory and operational isolation; they are alternatives, not enabled components of v2.5.1.
 
 ### Version scope and publication
 
-This document describes v2.5.0 implementation and resource models, not measured throughput or a capacity guarantee. Buffer-size arithmetic is not an RSS measurement. Batch availability, socket pressure and scheduler behavior depend on the Linux environment. Go UDP limits do not become nftables limits, and this release's flowtable configuration does not request NIC hardware offload.
+This document describes v2.5.1 implementation and resource models, not measured throughput or a capacity guarantee. Buffer-size arithmetic is not an RSS measurement. Batch availability, socket pressure and scheduler behavior depend on the Linux environment. Go UDP limits do not become nftables limits, and this release's flowtable configuration does not request NIC hardware offload.
 
 When sharing diagnostics, use synthetic endpoints and remove real source addresses, target domains, packet payloads, namespace identifiers and host paths.
 
@@ -89,7 +89,7 @@ When sharing diagnostics, use synthetic endpoints and remove real source address
 
 批量系统调用失败可能返回 `-1` 和错误；worker 将其保留为零完成量及原错误，不再误判成非法计数。发送时的 EAGAIN/EWOULDBLOCK、ENOBUFS、ENOMEM、EINTR 不销毁仍有效的会话，未发送包计入丢弃；非法计数和致命描述符错误仍然拒绝。这不保证过载零丢包，也不新增缓冲或重试队列。
 
-| 设置 | v2.5.0 默认值 |
+| 设置 | v2.5.1 默认值 |
 |---|---|
 | 自动整规则 worker 预算 | `min(GOMAXPROCS, 16)`，每个监听端点仍至少需要 1 个 worker |
 | Batch 大小 | `64` |
@@ -121,12 +121,12 @@ Go 数据面未实现 UDP GRO/GSO 启用逻辑，也没有对应配置开关。�
 
 先检查 NIC 队列、RSS、IRQ/CPU/NUMA 分布及 socket/softnet/NIC 丢包；RPS/XPS 和绑核需要业务验证。程序默认不以 `LockOSThread` 固定每个 worker。
 
-nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.5.0 已启用的数据面。
+nftables/flowtable 适合同族 NAT；Go batch 代理以适中的维护成本支持跨族。XDP/eBPF、AF_XDP 和 DPDK 提供更底层处理能力，但增加状态、路由/邻居、队列、内存及运维隔离成本；它们是可评估的替代方案，不是 v2.5.1 已启用的数据面。
 
 
 ### 版本范围与公开材料
 
-本文说明 v2.5.0 的实现与资源模型，不是实测吞吐或容量保证；缓冲大小计算不等于 RSS 实测。批量能力、套接字压力和调度行为受 Linux 环境影响。Go UDP 的限制不会变成 nftables 的限制，当前 flowtable 配置也不请求网卡硬件卸载。
+本文说明 v2.5.1 的实现与资源模型，不是实测吞吐或容量保证；缓冲大小计算不等于 RSS 实测。批量能力、套接字压力和调度行为受 Linux 环境影响。Go UDP 的限制不会变成 nftables 的限制，当前 flowtable 配置也不请求网卡硬件卸载。
 
 分享诊断时使用合成端点，删除真实来源地址、目标域名、报文载荷、命名空间标识与机器路径。
 

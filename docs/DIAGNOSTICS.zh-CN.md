@@ -1,4 +1,4 @@
-# 环境诊断与应用状态 — v2.5.0
+# 环境诊断与应用状态 — v2.5.1
 
 [README](../README.zh-CN.md) · [文档索引](INDEX.md) · [English](DIAGNOSTICS.en-US.md)
 

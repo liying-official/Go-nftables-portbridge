@@ -1,4 +1,4 @@
-# Interactive fresh installation — v2.5.0
+# Interactive fresh installation — v2.5.1
 
 [Back to README](../README.md) · [简体中文](ONECLICK.zh-CN.md) · [Pinned release installation](INSTALL.en-US.md)
 
@@ -37,7 +37,7 @@ Management binds to `0.0.0.0` and also `::` when IPv6 is enabled, with the stric
 
 The final local checks inspect service stability, a certificate-validated loopback HTTPS connection, administrator authentication and the persisted strict/whitelist configuration. **They do not prove that an allowed external client can connect, that a disallowed external source is blocked, or that a forwarding rule carries traffic.** Verify those separately from appropriate owned clients after installation.
 
-The success screen includes the certificate SHA-256, interface URLs and **the plaintext administrator token**. Do not record or publish that output. Verify the fingerprint before trusting a self-signed certificate. Both localized v2.5.0 packages include the same bilingual Web UI; the package only selects its initial language.
+The success screen includes the certificate SHA-256, interface URLs and **the plaintext administrator token**. Do not record or publish that output. Verify the fingerprint before trusting a self-signed certificate. Both localized v2.5.1 packages include the same bilingual Web UI; the package only selects its initial language.
 
 ## Existing installations and failures
 

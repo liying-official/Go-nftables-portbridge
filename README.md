@@ -60,7 +60,7 @@ Use the prebuilt asset for your architecture from [Releases](https://github.com/
 
 After installation: **add a forwarding rule → inspect its runtime state → verify that the target service is reachable**. Fresh installations contain no forwarding rules.
 
-> This README describes v2.5.0. The interactive installer selects the latest published stable release; use the matching documentation when deploying another version.
+> This README describes v2.5.1. The interactive installer selects the latest published stable release; use the matching documentation when deploying another version.
 
 ## Before you deploy
 

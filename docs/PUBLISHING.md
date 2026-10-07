@@ -1,4 +1,4 @@
-# Publication and privacy checklist / 公开发布与隐私检查 — v2.5.0
+# Publication and privacy checklist / 公开发布与隐私检查 — v2.5.1
 
 [English README](../README.md) · [中文 README](../README.zh-CN.md) · [Security / 安全](../SECURITY.md)
 
@@ -29,7 +29,7 @@ This checklist is not a statement that a future release has passed these checks.
 
 必须移除管理员令牌、API 密钥、Authorization/Cookie 值、SSH 凭据和各类私钥。已经泄露的凭据需要撤销或轮换，单纯删掉文本不够。真实管理/目标 IP、自有域名、机器名、账户、主目录、实例和网络标识，除明确批准公开者外都应替换。不要公开完整配置/状态响应、私有诊断日志、报文载荷/抓包、TLS 目录或令牌文件。
 
-示例优先使用文档保留地址段与 `.example` 域名，并注明占位、禁用演示规则。准确说明监听行为需要的回环/通配地址可以保留；明确描述安全策略的拒绝目标范围也不应误认成测试机地址。发布**公钥**、签名身份/namespace、指纹、源码/资源哈希和版权许可声明是必要公开信息，不能当作私钥或隐私删除。
+示例优先使用文档保留地址段与 `.example` 域名，并注明占位、禁用演示规则。准确说明监听行为需要的回环/通配地址可以保留；明确描述安全策略的拒绝目标范围也属于公开策略定义，不是实例专属配置。发布**公钥**、签名身份/namespace、指纹、源码/资源哈希和版权许可声明是必要公开信息，不能当作私钥或隐私删除。
 
 使用干净暂存目录和显式文件白名单，检查隐藏文件及嵌套归档。排除运行时 `.token`/`.key`、私有证书材料、`.env`、核心转储与原始证据目录。证书不是私钥，但 SAN 可能暴露主机信息；示例宜使用合成证书，而不是生产证书。
 

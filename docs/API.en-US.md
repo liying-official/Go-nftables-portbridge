@@ -1,17 +1,17 @@
-# Go-nftables-portbridge API Reference — v2.5.0
+# Go-nftables-portbridge API Reference — v2.5.1
 
 [Back to README](../README.md) · [Documentation index](INDEX.md)
 
 **Example safety:** IPs in documentation ranges and `.example` hosts are placeholders, not live targets or usable public resolvers. `dns_servers: []` uses the system resolver. Replace illustrative endpoints with systems you control; never paste real tokens, configuration responses or certificate keys into public issues.
 
-**Applies to: v2.5.0**
+**Applies to: v2.5.1**
 
 **Language:** **English** | [简体中文](API.zh-CN.md)  
 
 > [!IMPORTANT]
 > Configuration reads and management writes require an administrator Bearer token. A separate monitoring token can read only status, read-only diagnostics, application-operation status and metrics. Writes also require `X-PortBridge-CSRF`. Normal installations should use HTTPS. Do not treat an HTTP success status by itself as proof that the data plane is active or that an old forwarding path has been fully retired.
 
-This document describes the Web management HTTP API. It does not describe internal Go package APIs or the TCP/UDP protocol carried by forwarded application traffic. Field names, enum values, and error semantics follow the v2.5.0 implementation.
+This document describes the Web management HTTP API. It does not describe internal Go package APIs or the TCP/UDP protocol carried by forwarded application traffic. Field names, enum values, and error semantics follow the v2.5.1 implementation.
 
 Examples contain documentation placeholders, not live credentials or deployment details.
 
@@ -634,7 +634,7 @@ These budgets apply to the Go path and do not automatically constrain kernel nft
 
 Datagrams larger than `udp_packet_buffer_size` that are truncated are dropped and counted as application drops; truncated payload is not forwarded. Socket buffer values are requests, not guaranteed kernel-granted sizes. The status API does not expose effective socket buffer sizes or memory-budget consumption.[^udp-implementation][^udp-doc]
 
-v2.5.0 preserves valid UDP sessions under transient send pressure, but unsent packets are still counted as drops; these parameters do not guarantee zero loss under overload and do not create an unbounded retry queue.[^udp-doc]
+v2.5.1 preserves valid UDP sessions under transient send pressure, but unsent packets are still counted as drops; these parameters do not guarantee zero loss under overload and do not create an unbounded retry queue.[^udp-doc]
 
 ### 10.4 Port ranges
 
@@ -886,7 +886,7 @@ The handlers use this additive JSON error shape:[^json]
 | `429` | Too many failed authentications | APIError; no Retry-After contract |
 | `500` | Token/ID generation or rotation error, ACL refresh failure, etc. | APIError; may contain local error context |
 
-Go ServeMux GET routes also match HEAD. The root GET registration is also a fallback match, so some `Allow` headers can include `GET, HEAD`; this does not mean the resource implements a useful GET API. In v2.5.0, `OPTIONS /api/settings` returns `405` with `Allow: GET, HEAD, PUT`; do not interpret that as CORS support.[^routes]
+Go ServeMux GET routes also match HEAD. The root GET registration is also a fallback match, so some `Allow` headers can include `GET, HEAD`; this does not mean the resource implements a useful GET API. In v2.5.1, `OPTIONS /api/settings` returns `405` with `Allow: GET, HEAD, PUT`; do not interpret that as CORS support.[^routes]
 
 ### 12.3 Representative source error text
 
@@ -1094,7 +1094,7 @@ The CLI entry point only reads bootstrap and status; it does not create, update,
 
 ```python
 #!/usr/bin/env python3
-"""Go-nftables-portbridge v2.5.0 client; CLI performs read-only calls."""
+"""Go-nftables-portbridge v2.5.1 client; CLI performs read-only calls."""
 from __future__ import annotations
 
 import argparse
@@ -1357,7 +1357,7 @@ These are configuration-model capabilities, not extra API parameters. Adding the
 
 | Local field | Source default/range | API visibility |
 |---|---|---|
-| `version` | Config schema version `2`, not software release 2.5.0 | Not returned by GET config |
+| `version` | Config schema version `2`, not software release 2.5.1 | Not returned by GET config |
 | `web.admin_token_sha256` | SHA-256 of administrator token string | Not returned; cannot be set through settings |
 | `web.monitor_token_sha256` | SHA-256 of monitoring token string when configured | Only `monitor_token_configured` is returned; rotate/revoke through dedicated administrator endpoints |
 | `web.require_https` | Installation flow sets true; raw Default is false | Read only through `https.required`; settings does not accept it |
@@ -1398,7 +1398,7 @@ This endpoint only reads process environment and existing controller observation
 
 ## Implementation References and Source Links
 
-The links below assume this file is stored in the repository `docs/` directory and point to the v2.5.0 implementation. References use file-level links to avoid stale line ranges. Source footnotes distinguish implemented server behavior from client recommendations explicitly identified as such in this document.
+The links below assume this file is stored in the repository `docs/` directory and point to the v2.5.1 implementation. References use file-level links to avoid stale line ranges. Source footnotes distinguish implemented server behavior from client recommendations explicitly identified as such in this document.
 
 [^routes]: [`internal/web/server.go`](../internal/web/server.go). Complete route registration, root page, and static-resource fallback.
 [^web-start]: [`internal/web/server.go`](../internal/web/server.go). Listener addresses, native TLS, HTTP timeouts, and Header limits.

@@ -1,4 +1,4 @@
-# Static WebUI demo / 静态 WebUI 演示 — v2.5.0
+# Static WebUI demo / 静态 WebUI 演示 — v2.5.1
 
 ## English
 

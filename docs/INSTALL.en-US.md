@@ -1,10 +1,10 @@
-# Install, upgrade and operate PortBridge — v2.5.0
+# Install, upgrade and operate PortBridge — v2.5.1
 
 [Back to README](../README.md) · [简体中文](INSTALL.zh-CN.md) · [Documentation index](INDEX.md)
 
 This is the **version-pinned, signed-release installation** procedure. It keeps management on loopback by default. For a fresh Debian/Ubuntu installation with direct management access and a strict allowlist, use the [interactive installer](ONECLICK.en-US.md) instead.
 
-The commands require the publisher to have uploaded the matching **v2.5.0** release assets. This document is not evidence that those remote assets are available. Stop if an asset or signature is missing; do not replace a prebuilt release package with a GitHub source archive or an unsigned local build. A documentation-only revision is not a publisher-signed release.
+The commands require the publisher to have uploaded the matching **v2.5.1** release assets. This document is not evidence that those remote assets are available. Stop if an asset or signature is missing; do not replace a prebuilt release package with a GitHub source archive or an unsigned local build. A documentation-only revision is not a publisher-signed release.
 
 Follow sections 1–3 in order. Verify the trusted signing key before executing package scripts, and verify the generated TLS certificate before entering the administrator token.
 
@@ -23,7 +23,7 @@ Other distributions need equivalent packages installed through their own package
 
 ### 2. Download, verify and install
 
-The block below installs the **English v2.5.0 prebuilt release**, selecting your CPU architecture automatically. Run the entire block on the server. Root and sudo users are both supported; **Go is not required**. For an existing installation, read [Upgrade and uninstall](#upgrade-and-uninstall) first.
+The block below installs the **English v2.5.1 prebuilt release**, selecting your CPU architecture automatically. Run the entire block on the server. Root and sudo users are both supported; **Go is not required**. For an existing installation, read [Upgrade and uninstall](#upgrade-and-uninstall) first.
 
 ```bash
 bash <<'BASH'
@@ -35,13 +35,13 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH=arm64 ;;
   *) echo 'Unsupported CPU architecture' >&2; exit 1 ;;
 esac
-NAME="portbridge-v2.5.0-linux-${ARCH}-en-US"
-BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.0'
+NAME="portbridge-v2.5.1-linux-${ARCH}-en-US"
+BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.1'
 WORK=$(mktemp -d)
 cd "$WORK"
 for FILE in "$NAME.tar.gz" SHA256SUMS SHA256SUMS.sig; do
   curl -q -fL --proto '=https' --proto-redir '=https' \
-    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.0"
+    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.1"
 done
 printf '%s\n' 'portbridge-release-v2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVc6m1afFOM3gsLO6VXuLyAlHbkvBP83wlMEqArW/0k' > release-signers
 ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 \
@@ -54,7 +54,7 @@ tar -xzf "$NAME.tar.gz" --strip-components=1 -C package
 cd package
 test -x "dist/go-nftables-portbridge-linux-$ARCH"
 if (( EUID == 0 )); then ./scripts/install.sh; else sudo ./scripts/install.sh; fi
-test "$(/usr/local/bin/portbridge -version)" = '2.5.0'
+test "$(/usr/local/bin/portbridge -version)" = '2.5.1'
 systemctl is-active --quiet portbridge
 test "$(systemctl show portbridge -p SubState --value)" = running
 systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
@@ -64,16 +64,16 @@ BASH
 
 This verifies the signed checksum list **before extracting or running the archive**, checks the selected package hash, and invokes the bundled installer. The installer then verifies the pinned release key, internal manifest, source/script hashes, binary hash and version. Any failed check stops the flow; never bypass it.
 
-The final commands require version `2.5.0` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
+The final commands require version `2.5.1` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
 
 #### Release files and signature trust
 
-Use the attached assets on the [v2.5.0 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.0), not GitHub's automatically generated **Source code** archives.
+Use the attached assets on the [v2.5.1 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.1), not GitHub's automatically generated **Source code** archives.
 
 | CPU | English package | Simplified Chinese package |
 |---|---|---|
-| amd64 / x86_64 | `portbridge-v2.5.0-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.0-linux-amd64-zh-CN.tar.gz` |
-| arm64 / aarch64 | `portbridge-v2.5.0-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.0-linux-arm64-zh-CN.tar.gz` |
+| amd64 / x86_64 | `portbridge-v2.5.1-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.1-linux-amd64-zh-CN.tar.gz` |
+| arm64 / aarch64 | `portbridge-v2.5.1-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.1-linux-arm64-zh-CN.tar.gz` |
 
 The release also includes `SHA256SUMS`, `SHA256SUMS.sig` and `SBOM`. The quick start downloads only your selected archive and the two checksum files. It does not need the other three packages or the SBOM to install. There is no separate per-archive `.tar.gz.sig` or `release-signers` asset in this release.
 
@@ -83,7 +83,7 @@ The verification block pins the public key instead of trusting a key downloaded 
 SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o
 ```
 
-Signing identity: `portbridge-release-v2`. Signature namespace: `portbridge-release`. A signature establishes integrity and origin relative to the trusted key, not that a deployment is vulnerability-free. Version `2.5.0` is deliberately pinned; use the matching instructions and trust material when upgrading.
+Signing identity: `portbridge-release-v2`. Signature namespace: `portbridge-release`. A signature establishes integrity and origin relative to the trusted key, not that a deployment is vulnerability-free. Version `2.5.1` is deliberately pinned; use the matching instructions and trust material when upgrading.
 
 Do not edit files inside the verified package before installation, including its README files. Those files are covered by the internal signed manifest. Repacking or modifying a release requires regenerated manifests, checksums and publisher signatures.
 

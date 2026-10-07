@@ -1,8 +1,8 @@
-# PortBridge documentation / 文档索引 — v2.5.0
+# PortBridge documentation / 文档索引 — v2.5.1
 
 [English README](../README.md) · [中文 README](../README.zh-CN.md)
 
-Documentation for v2.5.0. Use the guides matching the version you install. / 本索引适用于 v2.5.0，安装时应使用与目标版本匹配的文档。
+Documentation for v2.5.1. Use the guides matching the version you install. / 本索引适用于 v2.5.1，安装时应使用与目标版本匹配的文档。
 
 ## User documentation / 使用文档
 

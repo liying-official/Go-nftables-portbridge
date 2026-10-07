@@ -1,7 +1,7 @@
 {
-  "version": "2.5.0",
+  "version": "2.5.1",
   "sources": {
-    "index.html": "405b07e5664e75840545a1c6bd2985471b46e616907e399281d7eac7846e514d",
+    "index.html": "1aa69c145adf0ac7fce53ba2740256d4fd52fe6d787481c6f78c600c27655fcf",
     "app.js": "59a7ee6ee649e7ad1d41d3025f7b2470232ff17724e00012f848e41fb0010dfd",
     "i18n.js": "8c7f7f1cda2ab812bb594ef63a16c7386259fa035b1f1a52eb79552d2dced577",
     "style.css": "65d74a7cb499190b05109714afe805b73d2689531a8d6469e89736cc30060db6",

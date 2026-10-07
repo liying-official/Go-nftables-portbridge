@@ -62,22 +62,22 @@ func TestOneclickLatestAssetSelection(t *testing.T) {
 	for _, arch := range []string{"amd64", "arm64"} {
 		for _, lang := range []string{"en-US", "zh-CN"} {
 			t.Run(arch+"-"+lang, func(t *testing.T) {
-				name := "portbridge-v2.5.0-linux-" + arch + "-" + lang
+				name := "portbridge-v2.5.1-linux-" + arch + "-" + lang
 				assets := []map[string]string{}
 				for _, file := range []string{name + ".tar.gz", "SHA256SUMS", "SHA256SUMS.sig"} {
-					assets = append(assets, map[string]string{"name": file, "state": "uploaded", "browser_download_url": "https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.0/" + file})
+					assets = append(assets, map[string]string{"name": file, "state": "uploaded", "browser_download_url": "https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.1/" + file})
 				}
-				data, _ := json.Marshal(map[string]any{"tag_name": "v2.5.0", "draft": false, "prerelease": false, "assets": assets})
+				data, _ := json.Marshal(map[string]any{"tag_name": "v2.5.1", "draft": false, "prerelease": false, "assets": assets})
 				file := filepath.Join(t.TempDir(), "release.json")
 				if err := os.WriteFile(file, data, 0600); err != nil {
 					t.Fatal(err)
 				}
 				out, err := oneclickHelper(t, "release", file, arch, lang)
-				if err != nil || strings.TrimSpace(string(out)) != "v2.5.0\n"+name {
+				if err != nil || strings.TrimSpace(string(out)) != "v2.5.1\n"+name {
 					t.Fatalf("unexpected selection: %s, %v", out, err)
 				}
 				assets[0]["browser_download_url"] = "https://example.invalid/package"
-				data, _ = json.Marshal(map[string]any{"tag_name": "v2.5.0", "assets": assets})
+				data, _ = json.Marshal(map[string]any{"tag_name": "v2.5.1", "assets": assets})
 				if err := os.WriteFile(file, data, 0600); err != nil {
 					t.Fatal(err)
 				}

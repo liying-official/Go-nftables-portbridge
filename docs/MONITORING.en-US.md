@@ -1,4 +1,4 @@
-# Traffic statistics and Prometheus — v2.5.0
+# Traffic statistics and Prometheus — v2.5.1
 
 [Back to README](../README.md) · [Documentation index](INDEX.md)
 
@@ -85,6 +85,6 @@ These rates are observations, not a guarantee of full flowtable accounting. See 
 
 ## Software flowtable is not a hardware-offload claim
 
-The generated flowtable includes `counter` but not `flags offload`. v2.5.0 does not request NIC hardware offload. Observations about offload limitations describe accounting boundaries, not proof that this application enabled a hardware path. See [`internal/proxy/nft.go`](../internal/proxy/nft.go).
+The generated flowtable includes `counter` but not `flags offload`. v2.5.1 does not request NIC hardware offload. Observations about offload limitations describe accounting boundaries, not proof that this application enabled a hardware path. See [`internal/proxy/nft.go`](../internal/proxy/nft.go).
 
 The Prometheus example uses the reserved host `pb.example`; replace it with a host whose certificate you trust. Rule IDs are included in labels and can be operator-supplied, so do not put private deployment details in IDs or publish an unreviewed metrics dump.

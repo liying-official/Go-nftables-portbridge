@@ -1,8 +1,8 @@
-# Go-nftables-portbridge v2.5.0 — Security policy / 安全说明
+# Go-nftables-portbridge v2.5.1 — Security policy / 安全说明
 
-## Scope: v2.5.0
+## Scope: v2.5.1
 
-v2.5.0 supports bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule's flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Validate firewall compatibility and capacity for the intended deployment.
+v2.5.1 supports bounded per-rule default-drop selective ACL proof, not arbitrary policy interpretation. Explicit effects/unknown nodes remain rejected; original tuple constraints prevent a suspended rule borrowing another rule's flow-add entry. Read [current security boundaries](docs/forwarding-limits.md). Two snapshots and periodic coordination are not zero-window/per-packet enforcement. Recovery still requires protected same-identity records; missing trusted ownership never authorizes guessed conntrack deletion. Validate firewall compatibility and capacity for the intended deployment.
 
 ## Reporting a vulnerability
 
@@ -61,7 +61,7 @@ Rule targets are untrusted input. Literal addresses and every DNS refresh result
 
 Global TCP connection, UDP session and estimated UDP-memory budgets apply to Go proxy paths together with per-rule and per-source limits. UDP source-session and token-bucket rate limits are shared across the rule's SO_REUSEPORT workers, port ranges, IPv4/IPv6 listeners, wildcard fallback and hybrid Go runners. They do not automatically constrain nftables/flowtable traffic; apply required kernel-path limits separately. Token buckets allow bounded bursts rather than fixed-window per-second guarantees. Monitor rejection/drop counters, socket drops, memory, file descriptors and conntrack use.
 
-The v2.5.0 release workflow packages four prebuilt Linux archives for amd64/arm64 and English/Simplified Chinese, plus SBOM and signed SHA256SUMS. Verify the checksum signature before extracting a package. Local builds are not automatically publisher-signed.
+The v2.5.1 release workflow packages four prebuilt Linux archives for amd64/arm64 and English/Simplified Chinese, plus SBOM and signed SHA256SUMS. Verify the checksum signature before extracting a package. Local builds are not automatically publisher-signed.
 
 ## Release integrity
 
@@ -81,7 +81,7 @@ Privacy review must distinguish real deployment data from reserved examples, loo
 
 Tabler 双语界面的 Core CSS/JS 和所需 Icons 均在本机提供，CSP 保持 `script-src 'self'` 与 `style-src 'self'`，不开放不安全内联、eval 或第三方 CDN。语言切换仅是浏览器偏好，不修改 API 或安全设置；localStorage 只保存语言，不保存管理员令牌。
 
-v2.5.0 支持逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除。部署时仍应确认防火墙兼容性和容量是否满足需求。
+v2.5.1 支持逐规则 default-drop 选择性 ACL 有界证明，不解释任意策略；未知及副作用节点继续拒绝，原始 tuple 约束防止被暂停规则借用其他规则的 flow add。参见[当前安全边界](docs/forwarding-limits.md)。两读/周期协调不保证零窗口或逐包授权。恢复仍依赖同身份可信记录，不按共享 mark 猜测删除。部署时仍应确认防火墙兼容性和容量是否满足需求。
 
 安装与升级后包括回环监听也强制 HTTPS；未配置证书时在启动前生成每台机器独立、有效期十年的 ECDSA P-256 自签证书。安装器与 systemd 双重执行要求，设置 API 拒绝清空证书或启用明文 HTTP。自签证书提供加密但需要核对指纹并建立客户端信任，不能等同于浏览器自动信任。已有有效证书保留，无效证书在预检时报错；导入和替换流程见[安装指南](docs/INSTALL.zh-CN.md)。默认仍关闭自动 LAN 识别，远程可使用 SSH 隧道。公网直连必须同时使用云安全组/主机防火墙、原生 TLS 与严格 IP 白名单：先配置证书并重启确认 HTTPS，再从 HTTPS 关闭自动 LAN、加入当前直连地址并启用严格模式。严格模式忽略自动 LAN 和 `--bootstrap-allow`，拒绝 `/0`，只额外保留回环恢复通道；TLS 默认最低 1.2，公网直连可设置 `web.tls_min_version=1.3`（重启生效），私钥必须是非符号链接的常规文件，通常使用 `0600` 或 `0640 root:portbridge`。
 
@@ -93,7 +93,7 @@ PortBridge 不信任 `Forwarded`、`X-Forwarded-For`。反向代理到后端也�
 
 并发轮换会在令牌文件、配置和回滚期间完整串行化，但进程或电源在两次写入之间中断仍可能造成不一致。启动时会明确告警，并继续按配置哈希认证。恢复时先停止服务，再以服务账户和相同配置/令牌路径执行 `--reset-admin-token`，随后重新启动。对运行中进程单独重置磁盘文件不会刷新其内存凭据。
 
-v2.5.0 发布流程打包 amd64/arm64 × 中英双语四个 Linux 预编译归档、SBOM 和已签名 SHA256SUMS。解压前先验证校验清单签名；安装器另行验证包内签名清单。本地构建产物不会自动获得发布者签名。验签步骤见[安装指南](docs/INSTALL.zh-CN.md)。
+v2.5.1 发布流程打包 amd64/arm64 × 中英双语四个 Linux 预编译归档、SBOM 和已签名 SHA256SUMS。解压前先验证校验清单签名；安装器另行验证包内签名清单。本地构建产物不会自动获得发布者签名。验签步骤见[安装指南](docs/INSTALL.zh-CN.md)。
 
 签名身份为 `portbridge-release-v2`，namespace 为 `portbridge-release`。应先从可信来源核对预期公钥/指纹，再信任包内 signer；私钥备份应离线保存并与发布文件分离。
 

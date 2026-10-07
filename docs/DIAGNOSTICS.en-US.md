@@ -1,4 +1,4 @@
-# Environment and application diagnostics — v2.5.0
+# Environment and application diagnostics — v2.5.1
 
 [README](../README.md) · [Documentation](INDEX.md) · [简体中文](DIAGNOSTICS.zh-CN.md)
 

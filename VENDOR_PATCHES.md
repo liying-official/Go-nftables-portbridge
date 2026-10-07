@@ -1,8 +1,8 @@
-# Go-nftables-portbridge v2.5.0 — Vendored patches / 依赖补丁
+# Go-nftables-portbridge v2.5.1 — Vendored patches / 依赖补丁
 
 ## English
 
-v2.5.0 uses Go 1.27.1, `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0`. Dependencies are vendored for offline builds.
+v2.5.1 uses Go 1.27.1, `golang.org/x/net v0.58.0` and `golang.org/x/sys v0.47.0`. Dependencies are vendored for offline builds.
 
 The module checksums recorded in `go.sum` are:
 
@@ -21,13 +21,13 @@ Upstream module checksums do not authenticate patched vendor files. Verify the s
 
 ### Verification scope
 
-The versions and checksums above describe v2.5.0. Verifying local asset hashes does not independently verify a registry tarball or a release signature, and it is not a vulnerability scan. Do not run `go mod vendor` over the patched tree without deliberately reapplying and testing the documented patch. Preserve third-party copyright and license notices when publishing.
+The versions and checksums above describe v2.5.1. Verifying local asset hashes does not independently verify a registry tarball or a release signature, and it is not a vulnerability scan. Do not run `go mod vendor` over the patched tree without deliberately reapplying and testing the documented patch. Preserve third-party copyright and license notices when publishing.
 
 [Contributing](CONTRIBUTING.md) · [Documentation](docs/INDEX.md)
 
 ## 简体中文
 
-v2.5.0 使用 Go 1.27.1、`golang.org/x/net v0.58.0` 和 `golang.org/x/sys v0.47.0`，依赖存放在 vendor 中以支持离线构建。以下摘要与 `go.sum` 一致；`h1:` 是 Go 模块校验值，不是压缩包 SHA-256。
+v2.5.1 使用 Go 1.27.1、`golang.org/x/net v0.58.0` 和 `golang.org/x/sys v0.47.0`，依赖存放在 vendor 中以支持离线构建。以下摘要与 `go.sum` 一致；`h1:` 是 Go 模块校验值，不是压缩包 SHA-256。
 
 ```text
 golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=
@@ -43,6 +43,6 @@ WebUI 内嵌 Tabler Core 1.5.1 CSS/JS 与所需 Tabler Icons 3.48.0 SVG。Core �
 
 ### 校验范围
 
-上述版本和摘要描述 v2.5.0。核对本地资源哈希不能替代对注册表归档或发布签名的独立验证，也不是漏洞扫描。不要直接运行 `go mod vendor` 覆盖含补丁的依赖树，除非已经计划重新应用并测试补丁。发布时必须保留第三方版权与许可声明。
+上述版本和摘要描述 v2.5.1。核对本地资源哈希不能替代对注册表归档或发布签名的独立验证，也不是漏洞扫描。不要直接运行 `go mod vendor` 覆盖含补丁的依赖树，除非已经计划重新应用并测试补丁。发布时必须保留第三方版权与许可声明。
 
 [贡献指南](CONTRIBUTING.md) · [文档索引](docs/INDEX.md)

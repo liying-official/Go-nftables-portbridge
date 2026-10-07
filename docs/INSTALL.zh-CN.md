@@ -1,10 +1,10 @@
-# PortBridge 安装、升级与运维 — v2.5.0
+# PortBridge 安装、升级与运维 — v2.5.1
 
 [返回 README](../README.zh-CN.md) · [English](INSTALL.en-US.md) · [文档索引](INDEX.md)
 
 本文提供**固定版本、发布包验签后安装**的完整流程，默认只在回环地址开放管理服务。需要在 Debian/Ubuntu 上全新安装并使用严格白名单直接访问管理界面时，可选择[交互式安装器](ONECLICK.zh-CN.md)。
 
-命令依赖发布者已上传对应的 **v2.5.0** Release 资产。本文不证明远端资产已经可用。资产或签名缺失时应停止，不要用 GitHub 自动生成的源码归档或未签名本地构建替代预编译发布包。仅修改文档的源码包并不具有发布者签名。
+命令依赖发布者已上传对应的 **v2.5.1** Release 资产。本文不证明远端资产已经可用。资产或签名缺失时应停止，不要用 GitHub 自动生成的源码归档或未签名本地构建替代预编译发布包。仅修改文档的源码包并不具有发布者签名。
 
 依次完成第 1–3 步。执行包内脚本前先确认可信发布公钥；输入管理员令牌前先验证服务器 TLS 证书。
 
@@ -23,7 +23,7 @@ sudo apt-get install -y --no-install-recommends ca-certificates curl openssh-cli
 
 ### 2. 下载、验证并安装
 
-以下代码安装 **v2.5.0 中文预编译发布包**，自动选择 CPU 架构。在服务器上完整复制执行即可，兼容 root 和 sudo 用户，**无需安装 Go**。已有实例请先阅读[升级与卸载](#升级与卸载)。
+以下代码安装 **v2.5.1 中文预编译发布包**，自动选择 CPU 架构。在服务器上完整复制执行即可，兼容 root 和 sudo 用户，**无需安装 Go**。已有实例请先阅读[升级与卸载](#升级与卸载)。
 
 ```bash
 bash <<'BASH'
@@ -35,13 +35,13 @@ case "$(uname -m)" in
   aarch64|arm64) ARCH=arm64 ;;
   *) echo '不支持的 CPU 架构' >&2; exit 1 ;;
 esac
-NAME="portbridge-v2.5.0-linux-${ARCH}-zh-CN"
-BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.0'
+NAME="portbridge-v2.5.1-linux-${ARCH}-zh-CN"
+BASE='https://github.com/liying-official/Go-nftables-portbridge/releases/download/v2.5.1'
 WORK=$(mktemp -d)
 cd "$WORK"
 for FILE in "$NAME.tar.gz" SHA256SUMS SHA256SUMS.sig; do
   curl -q -fL --proto '=https' --proto-redir '=https' \
-    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.0"
+    -H 'Cache-Control: no-cache' -o "$FILE" "$BASE/$FILE?release=binary-v2.5.1"
 done
 printf '%s\n' 'portbridge-release-v2 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVc6m1afFOM3gsLO6VXuLyAlHbkvBP83wlMEqArW/0k' > release-signers
 ssh-keygen -Y verify -f release-signers -I portbridge-release-v2 \
@@ -54,7 +54,7 @@ tar -xzf "$NAME.tar.gz" --strip-components=1 -C package
 cd package
 test -x "dist/go-nftables-portbridge-linux-$ARCH"
 if (( EUID == 0 )); then ./scripts/install.sh; else sudo ./scripts/install.sh; fi
-test "$(/usr/local/bin/portbridge -version)" = '2.5.0'
+test "$(/usr/local/bin/portbridge -version)" = '2.5.1'
 systemctl is-active --quiet portbridge
 test "$(systemctl show portbridge -p SubState --value)" = running
 systemctl show portbridge -p ActiveState -p SubState -p Result -p MainPID -p NRestarts
@@ -64,16 +64,16 @@ BASH
 
 流程会在**解压或执行归档前**验证校验和清单的签名，核对当前发布包摘要，再调用包内安装器。安装器继续检查固定发布公钥、内部清单、源码/脚本摘要、二进制摘要和版本。任一步失败都会停止，请勿绕过校验。
 
-末尾命令要求版本为 `2.5.0`、服务为 `active/running`，并输出结果、进程 ID 和重启次数。安装器会创建服务账户、配置 HTTPS、安装并启用 systemd 服务、设置转发 sysctl，然后启动 PortBridge。全新安装**不包含任何转发规则**。
+末尾命令要求版本为 `2.5.1`、服务为 `active/running`，并输出结果、进程 ID 和重启次数。安装器会创建服务账户、配置 HTTPS、安装并启用 systemd 服务、设置转发 sysctl，然后启动 PortBridge。全新安装**不包含任何转发规则**。
 
 #### 发布包与签名信任说明
 
-请选择 [v2.5.0 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.0) 中上传的附件，不要选择 GitHub 自动生成的 **Source code** 归档。
+请选择 [v2.5.1 Release](https://github.com/liying-official/Go-nftables-portbridge/releases/tag/v2.5.1) 中上传的附件，不要选择 GitHub 自动生成的 **Source code** 归档。
 
 | CPU | 英文包 | 简体中文包 |
 |---|---|---|
-| amd64 / x86_64 | `portbridge-v2.5.0-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.0-linux-amd64-zh-CN.tar.gz` |
-| arm64 / aarch64 | `portbridge-v2.5.0-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.0-linux-arm64-zh-CN.tar.gz` |
+| amd64 / x86_64 | `portbridge-v2.5.1-linux-amd64-en-US.tar.gz` | `portbridge-v2.5.1-linux-amd64-zh-CN.tar.gz` |
+| arm64 / aarch64 | `portbridge-v2.5.1-linux-arm64-en-US.tar.gz` | `portbridge-v2.5.1-linux-arm64-zh-CN.tar.gz` |
 
 Release 还提供 `SHA256SUMS`、`SHA256SUMS.sig` 和 `SBOM`。快速安装只下载当前架构/语言包及两个校验文件，不需要其余三个包或 SBOM。此版本没有逐归档 `.tar.gz.sig`，也没有独立的 `release-signers` 附件。
 
@@ -83,7 +83,7 @@ Release 还提供 `SHA256SUMS`、`SHA256SUMS.sig` 和 `SBOM`。快速安装只�
 SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o
 ```
 
-签名身份为 `portbridge-release-v2`，命名空间为 `portbridge-release`。签名只能在可信公钥的前提下证明来源及完整性，并不保证部署没有漏洞。命令有意固定到 `2.5.0`；升级时请使用对应版本的说明与信任材料。
+签名身份为 `portbridge-release-v2`，命名空间为 `portbridge-release`。签名只能在可信公钥的前提下证明来源及完整性，并不保证部署没有漏洞。命令有意固定到 `2.5.1`；升级时请使用对应版本的说明与信任材料。
 
 安装前不要修改已验证包内的文件，包括 README；这些文件受内部签名清单保护。修改或重新打包 Release 后，必须重新生成清单、校验和及发布者签名。
 

@@ -1,17 +1,17 @@
-# Go-nftables-portbridge API 参考 — v2.5.0
+# Go-nftables-portbridge API 参考 — v2.5.1
 
 [返回 README](../README.zh-CN.md) · [文档索引](INDEX.md)
 
 **示例安全：** 文档保留地址段和 `.example` 主机名均为占位符，不是真实目标，也不是可用的公共 DNS。`dns_servers: []` 使用系统解析器。应替换为自己控制的端点，不要把真实令牌、配置响应或证书私钥粘贴到公开 Issue。
 
-**适用版本：v2.5.0**
+**适用版本：v2.5.1**
 
 **语言：** [English](API.en-US.md) | **简体中文**  
 
 > [!IMPORTANT]
 > 读取配置与管理写操作要求管理员 Bearer Token；独立监控令牌只能读取状态、只读诊断、应用操作状态和指标。写操作还要求 `X-PortBridge-CSRF`。正常安装应通过 HTTPS 访问；不要把 HTTP 成功状态单独视为数据面已经生效或旧转发路径已经完全撤销。
 
-本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.5.0 实现为准。
+本文档描述 Web 管理 HTTP API。它不描述 Go 内部包接口，也不描述被转发业务流量本身的 TCP/UDP 协议。字段名、枚举值和错误语义以 v2.5.1 实现为准。
 
 示例使用文档占位值，不包含真实凭据或部署信息。
 
@@ -634,7 +634,7 @@ Rule 结构定义 **32 个可能的 JSON 字段**，并不保证每份响应都�
 
 超过 `udp_packet_buffer_size` 被截断的数据报会被丢弃并计入应用丢包，不会转发截断后的部分内容。socket 缓冲是申请值，不是保证获得的内核值；状态 API 不返回实际 socket 缓冲大小或内存预算占用。[^udp-implementation][^udp-doc]
 
-v2.5.0 对瞬态 UDP 发送压力保留有效会话，但未发送的包仍计为丢弃；这些参数不提供“过载零丢包”保证，也不创建无限重试队列。[^udp-doc]
+v2.5.1 对瞬态 UDP 发送压力保留有效会话，但未发送的包仍计为丢弃；这些参数不提供“过载零丢包”保证，也不创建无限重试队列。[^udp-doc]
 
 ### 10.4 端口区间
 
@@ -1092,7 +1092,7 @@ CLI 主入口只读取 bootstrap 和状态，不创建、更新、删除或轮�
 
 ```python
 #!/usr/bin/env python3
-"""Go-nftables-portbridge v2.5.0 client; CLI performs read-only calls."""
+"""Go-nftables-portbridge v2.5.1 client; CLI performs read-only calls."""
 from __future__ import annotations
 
 import argparse
@@ -1355,7 +1355,7 @@ Store 内部对更新加锁并原子替换配置文件。`GET /api/config` 暴�
 
 | 本地字段 | 源码默认/范围 | API 可见性 |
 |---|---|---|
-| `version` | 配置 schema 版本 `2`，不是软件发布版本 2.5.0 | GET config 不返回 |
+| `version` | 配置 schema 版本 `2`，不是软件发布版本 2.5.1 | GET config 不返回 |
 | `web.admin_token_sha256` | 管理员 Token 字符串的 SHA-256 | 不返回，不能通过 settings 设置 |
 | `web.monitor_token_sha256` | 已配置监控令牌时其字符串的 SHA-256 | 只返回 `monitor_token_configured` 状态；通过仅管理员可用的接口轮换/撤销 |
 | `web.require_https` | 安装流程设为 true，原始 Default 为 false | 只通过 `https.required` 读取；settings 不接受 |
@@ -1396,7 +1396,7 @@ Store 内部对更新加锁并原子替换配置文件。`GET /api/config` 暴�
 
 ## 实现依据与源码链接
 
-以下链接按本文位于仓库 `docs/` 目录计算，并指向 v2.5.0 对应实现。引用采用文件级链接，避免行号变化导致错误定位；正文脚注用于区分服务端已有行为与本文明确标记的客户端建议。
+以下链接按本文位于仓库 `docs/` 目录计算，并指向 v2.5.1 对应实现。引用采用文件级链接，避免行号变化导致错误定位；正文脚注用于区分服务端已有行为与本文明确标记的客户端建议。
 
 [^routes]: [`internal/web/server.go`](../internal/web/server.go)。完整路由注册、根页面与静态资源兜底。
 [^web-start]: [`internal/web/server.go`](../internal/web/server.go)。监听地址、原生 TLS、HTTP 时限与 Header 上限。

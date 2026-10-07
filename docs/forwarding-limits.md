@@ -1,4 +1,4 @@
-# v2.5.0 forwarding limits / 转发限制
+# v2.5.1 forwarding limits / 转发限制
 
 ## English
 

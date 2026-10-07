@@ -36,7 +36,7 @@ func TestArchitectureSpecificBundleMetadataMatchesOneclick(t *testing.T) {
 					t.Fatal(err)
 				}
 				var listing strings.Builder
-				for _, item := range []struct{ name, value string }{{"VERSION", "2.5.0\n"}, {"PACKAGE_LANGUAGE", language + "\n"}} {
+				for _, item := range []struct{ name, value string }{{"VERSION", "2.5.1\n"}, {"PACKAGE_LANGUAGE", language + "\n"}} {
 					if err := os.WriteFile(filepath.Join(root, item.name), []byte(item.value), 0644); err != nil {
 						t.Fatal(err)
 					}
@@ -46,11 +46,11 @@ func TestArchitectureSpecificBundleMetadataMatchesOneclick(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(root, "source-tree.sha256"), []byte(listing.String()), 0644); err != nil {
 					t.Fatal(err)
 				}
-				args := []string{"../scripts/release-metadata.py", "bundle", root, "2.5.0", strings.Repeat("a", 40), "go1.27.1", "--arch", arch, "--language", language}
+				args := []string{"../scripts/release-metadata.py", "bundle", root, "2.5.1", strings.Repeat("a", 40), "go1.27.1", "--arch", arch, "--language", language}
 				if out, err := exec.Command("python3", args...).CombinedOutput(); err != nil {
 					t.Fatalf("metadata: %v: %s", err, out)
 				}
-				if out, err := oneclickHelper(t, "bundle", root, "2.5.0", arch); err != nil {
+				if out, err := oneclickHelper(t, "bundle", root, "2.5.1", arch); err != nil {
 					t.Fatalf("one-click rejected matching bundle: %v: %s", err, out)
 				}
 				data, err := os.ReadFile(filepath.Join(root, "release-bundle-manifest.json"))
@@ -67,7 +67,7 @@ func TestArchitectureSpecificBundleMetadataMatchesOneclick(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(root, "VERSION"), []byte("tampered\n"), 0644); err != nil {
 					t.Fatal(err)
 				}
-				if out, err := oneclickHelper(t, "bundle", root, "2.5.0", arch); err == nil {
+				if out, err := oneclickHelper(t, "bundle", root, "2.5.1", arch); err == nil {
 					t.Fatalf("one-click accepted changed bundle: %s", out)
 				}
 			})

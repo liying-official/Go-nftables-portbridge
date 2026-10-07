@@ -1,4 +1,4 @@
-# 流量统计与 Prometheus — v2.5.0
+# 流量统计与 Prometheus — v2.5.1
 
 [返回 README](../README.zh-CN.md) · [文档索引](INDEX.md)
 
@@ -85,6 +85,6 @@ portbridge_rule_bytes_per_second{source="nft",direction="up"}
 
 ## Software flowtable 不等于硬件卸载
 
-生成的 flowtable 包含 `counter`，但不包含 `flags offload`，v2.5.0 不请求网卡硬件卸载。关于卸载与计数限制的说明不能证明本应用已启用硬件路径，见 [`internal/proxy/nft.go`](../internal/proxy/nft.go)。
+生成的 flowtable 包含 `counter`，但不包含 `flags offload`，v2.5.1 不请求网卡硬件卸载。关于卸载与计数限制的说明不能证明本应用已启用硬件路径，见 [`internal/proxy/nft.go`](../internal/proxy/nft.go)。
 
 Prometheus 示例使用保留主机名 `pb.example`，需要替换为具有可信证书的实际主机。指标标签包含规则 ID，且 ID 可以由运维者提供；不要把私有部署信息写进 ID，也不要直接公开未经检查的指标转储。
