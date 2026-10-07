@@ -45,6 +45,8 @@ Try the [static WebUI demo](https://liying-official.github.io/Go-nftables-portbr
 
 Use a **Linux amd64 / arm64** host with **systemd**, **root/sudo** access and the required networking permissions. Prebuilt release packages **do not require Go**.
 
+Prebuilt packages contain the executable, installation scripts, signature metadata, license notices and only the selected language's user documentation. Source, tests and the static demo remain in the repository; WebGUI stays bilingual.
+
 | Installation guide | When to use it | Management access |
 | --- | --- | --- |
 | **[Release installation and upgrades](docs/INSTALL.en-US.md)** | Install the version pinned in the guide, or upgrade an existing deployment. | Loopback-only HTTPS by default, suitable for management through an SSH tunnel. |

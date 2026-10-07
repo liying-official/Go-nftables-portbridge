@@ -62,7 +62,7 @@ printf 'Installed; extracted release directory: %s\n' "$PWD"
 BASH
 ```
 
-This verifies the signed checksum list **before extracting or running the archive**, checks the selected package hash, and invokes the bundled installer. The installer then verifies the pinned release key, internal manifest, source/script hashes, binary hash and version. Any failed check stops the flow; never bypass it.
+This verifies the signed checksum list **before extracting or running the archive**, checks the selected package hash, and invokes the bundled installer. The installer then verifies the pinned release key, internal manifest, package-file hashes, binary hash and version. Any failed check stops the flow; never bypass it. The retained filename `source-tree.sha256` covers the delivered scripts, documentation, notices and metadata; prebuilt packages do not contain the source tree or static demo.
 
 The final commands require version `2.5.1` and an `active/running` service, and display its result, PID and restart count. The installer creates the service account, provisions HTTPS, installs/enables the systemd unit, applies forwarding sysctls and starts PortBridge. Fresh installations have **no forwarding rules**.
 

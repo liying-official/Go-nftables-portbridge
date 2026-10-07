@@ -78,6 +78,7 @@ cd -- "$ROOT_DIR"
 export GOTOOLCHAIN="$RELEASE_TOOLCHAIN"
 export GOFLAGS="-mod=vendor"
 ACTUAL_TOOLCHAIN="$($GO_BIN env GOVERSION)"
+GO_ROOT="$($GO_BIN env GOROOT)"
 if [[ "$ACTUAL_TOOLCHAIN" != "$RELEASE_TOOLCHAIN" ]]; then
   echo "Release requires $RELEASE_TOOLCHAIN, got $ACTUAL_TOOLCHAIN" >&2
   exit 1
@@ -143,9 +144,10 @@ for language in en-US zh-CN; do
   for arch in amd64 arm64; do
     name="portbridge-v${VERSION}-linux-${arch}-${language}"
     bundle="$STAGING/$name"
-    cp -a -- "$LOCALIZED" "$bundle"
+    python3 "$ROOT_DIR/scripts/assemble-binary-package.py" "$LOCALIZED" "$bundle" "$language" --go-root "$GO_ROOT"
+    install -d -m 0755 "$bundle/dist"
     binary="$bundle/dist/go-nftables-portbridge-linux-$arch"
-    (cd -- "$bundle"; CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" -o "$binary" ./cmd/portbridge)
+    (cd -- "$LOCALIZED"; CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO_BIN" build -trimpath -ldflags="$LDFLAGS" -o "$binary" ./cmd/portbridge)
     "$GO_BIN" version -m "$binary" | grep -F "$ACTUAL_TOOLCHAIN"
     if [[ "$arch" == "$($GO_BIN env GOHOSTARCH)" && "$($GO_BIN env GOHOSTOS)" == linux ]]; then
       [[ "$("$binary" -version)" == "$VERSION" ]]

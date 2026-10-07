@@ -119,9 +119,9 @@ if [[ $PREBUILT -eq 1 ]]; then
     echo "Signed release metadata is incomplete or inconsistent." >&2
     exit 1
   fi
-  [[ -f "$ROOT_DIR/source-tree.sha256" ]] || { echo "Release bundle source hash manifest is missing." >&2; exit 1; }
-  [[ "$(sha256sum "$ROOT_DIR/source-tree.sha256" | awk '{print $1}')" == "$SIGNED_SOURCE_SHA" ]] || { echo "Source hash manifest does not match signed metadata." >&2; exit 1; }
-  (cd "$ROOT_DIR" && sha256sum -c source-tree.sha256 >/dev/null) || { echo "Release source/script integrity verification failed." >&2; exit 1; }
+  [[ -f "$ROOT_DIR/source-tree.sha256" ]] || { echo "Release bundle file hash manifest is missing." >&2; exit 1; }
+  [[ "$(sha256sum "$ROOT_DIR/source-tree.sha256" | awk '{print $1}')" == "$SIGNED_SOURCE_SHA" ]] || { echo "Package file hash manifest does not match signed metadata." >&2; exit 1; }
+  (cd "$ROOT_DIR" && sha256sum -c source-tree.sha256 >/dev/null) || { echo "Release package-file integrity verification failed." >&2; exit 1; }
   ACTUAL_SHA="$(sha256sum "$BIN" | awk '{print $1}')"
   if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
     echo "Prebuilt binary checksum does not match the signed manifest." >&2

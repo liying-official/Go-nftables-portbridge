@@ -119,9 +119,9 @@ if [[ $PREBUILT -eq 1 ]]; then
     echo "签名发布元数据不完整或不一致。" >&2
     exit 1
   fi
-  [[ -f "$ROOT_DIR/source-tree.sha256" ]] || { echo "发布包缺少源码哈希清单。" >&2; exit 1; }
-  [[ "$(sha256sum "$ROOT_DIR/source-tree.sha256" | awk '{print $1}')" == "$SIGNED_SOURCE_SHA" ]] || { echo "源码哈希清单与签名元数据不一致。" >&2; exit 1; }
-  (cd "$ROOT_DIR" && sha256sum -c source-tree.sha256 >/dev/null) || { echo "发布包源码/脚本完整性验证失败。" >&2; exit 1; }
+  [[ -f "$ROOT_DIR/source-tree.sha256" ]] || { echo "发布包缺少文件哈希清单。" >&2; exit 1; }
+  [[ "$(sha256sum "$ROOT_DIR/source-tree.sha256" | awk '{print $1}')" == "$SIGNED_SOURCE_SHA" ]] || { echo "文件哈希清单与签名元数据不一致。" >&2; exit 1; }
+  (cd "$ROOT_DIR" && sha256sum -c source-tree.sha256 >/dev/null) || { echo "发布包文件完整性验证失败。" >&2; exit 1; }
   ACTUAL_SHA="$(sha256sum "$BIN" | awk '{print $1}')"
   [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]] || { echo "预编译二进制哈希与签名清单不一致。" >&2; exit 1; }
   [[ "$($BIN -version)" == "$VERSION" ]] || { echo "预编译二进制版本与 VERSION 不一致。" >&2; exit 1; }

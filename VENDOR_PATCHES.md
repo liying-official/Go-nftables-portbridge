@@ -17,7 +17,7 @@ The WebUI embeds Tabler Core 1.5.1 CSS/JS and selected Tabler Icons 3.48.0 SVGs.
 
 The batch-address-reuse patch is in `vendor/golang.org/x/net/internal/socket/mmsghdr_unix.go` and `sys_posix.go`. On Linux, batch reads reuse a pre-populated `net.UDPAddr` and its `net.IP` backing array. Calls without a pre-populated `Message.Addr` retain upstream behavior.
 
-Upstream module checksums do not authenticate patched vendor files. Verify the signed SHA256SUMS and the internal release manifest against the trusted release key. The internal manifest binds source-tree.sha256, including the delivered vendor files. CANDIDATE_SOURCE_SHA256SUMS is a source-checkout integrity list, not a publisher signature.
+Upstream module checksums do not authenticate patched vendor files. Verify the signed SHA256SUMS and the internal release manifest against the trusted release key. The internal manifest binds source-tree.sha256 for delivered package files and separately binds the executable. Vendored source remains in the repository, not the prebuilt package; its license and patent notices are retained in the package. CANDIDATE_SOURCE_SHA256SUMS is a source-checkout integrity list, not a publisher signature.
 
 ### Verification scope
 
@@ -38,7 +38,7 @@ WebUI 内嵌 Tabler Core 1.5.1 CSS/JS 与所需 Tabler Icons 3.48.0 SVG。Core �
 
 批量地址复用补丁位于 `vendor/golang.org/x/net/internal/socket/mmsghdr_unix.go` 和 `sys_posix.go`：Linux 批量读取会复用调用方预填的 `net.UDPAddr` 及 `net.IP` 底层数组；未预填 `Message.Addr` 的调用保持上游行为。
 
-上游模块摘要不覆盖 vendor 补丁。应使用可信发布公钥验证 SHA256SUMS 及内部签名清单；内部清单通过 source-tree.sha256 绑定实际交付的 vendor 文件。CANDIDATE_SOURCE_SHA256SUMS 是源码检出的完整性清单，不是发布者签名。
+上游模块摘要不覆盖 vendor 补丁。应使用可信发布公钥验证 SHA256SUMS 及内部签名清单；内部清单通过 source-tree.sha256 绑定包内交付文件，并单独绑定程序摘要。vendor 源码保留在仓库中，不再随预编译包交付；对应许可证和专利声明仍保留在包内。CANDIDATE_SOURCE_SHA256SUMS 是源码检出的完整性清单，不是发布者签名。
 
 
 ### 校验范围

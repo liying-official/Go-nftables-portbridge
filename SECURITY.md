@@ -65,7 +65,7 @@ The v2.5.1 release workflow packages four prebuilt Linux archives for amd64/arm6
 
 ## Release integrity
 
-Prebuilt installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and source/binary hashes. The signed SHA256SUMS authenticates the four archives and SBOM; the signed internal manifest separately authenticates the installed package contents. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the signing private key must never be shipped in the repository or archives. The public key and its fingerprint are intended public trust material, not credentials to redact.
+Prebuilt installation is fail-closed: the installer contains the expected Ed25519 public key and fingerprint, rejects a bundle signer file that is a symlink, non-regular file, hard link, extra line, or different key, and only then uses that key to verify the internal bundle manifest before package installation changes system state. The manifest binds the version, source revision, Go toolchain, architecture, and package-file/binary hashes. The signed SHA256SUMS authenticates the four archives and SBOM; the signed internal manifest separately authenticates the installed package contents. The pinned public-key fingerprint is `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`; the signing private key must never be shipped in the repository or archives. The public key and its fingerprint are intended public trust material, not credentials to redact.
 
 The signing identity is `portbridge-release-v2` and the namespace is `portbridge-release`. Verify the expected key/fingerprint from a trusted source before trusting bundled signer data. Keep private-key backups offline and separate from published files.
 
@@ -101,7 +101,7 @@ v2.5.1 发布流程打包 amd64/arm64 × 中英双语四个 Linux 预编译归�
 
 服务只操作真实 owner 验证后的自有表。nft 入口更新与 conntrack 撤销分属不同操作，依据完整 tuple/mark/common zone 定向处理，并用自有无 hook 恢复链及可见错误保存未完成状态。删表不等于撤销；所有权记录与进程内存同时丢失时旧流仍可能活动，不能只按共享 mark 猜测清理。详见转发限制。
 
-转发目标和每次 DNS 刷新都会拒绝未授权的本机/私网/链路本地/多播/未指定/CGNAT/云元数据地址，私网目标必须同时启用 `allow_private_target` 并填写窄范围 `target_cidr_allowlist`。连接、会话、速率和估算内存预算作用于 Go 代理路径；UDP 来源预算在同一逻辑规则的 worker、端口段、地址族、通配 fallback 和 hybrid Go runner 之间共享。速率采用允许受限突发的令牌桶，不是任意固定一秒窗口的严格计数；这些设置不会自动限制 nftables/flowtable 内核转发。预编译安装器固定 Ed25519 公钥和指纹，先拒绝替换、链接或多 key signer，再校验签名清单及源码/二进制。发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`；签名私钥不得随包分发；公钥与指纹是需要公开保留的信任材料，不应当作秘密删除。
+转发目标和每次 DNS 刷新都会拒绝未授权的本机/私网/链路本地/多播/未指定/CGNAT/云元数据地址，私网目标必须同时启用 `allow_private_target` 并填写窄范围 `target_cidr_allowlist`。连接、会话、速率和估算内存预算作用于 Go 代理路径；UDP 来源预算在同一逻辑规则的 worker、端口段、地址族、通配 fallback 和 hybrid Go runner 之间共享。速率采用允许受限突发的令牌桶，不是任意固定一秒窗口的严格计数；这些设置不会自动限制 nftables/flowtable 内核转发。预编译安装器固定 Ed25519 公钥和指纹，先拒绝替换、链接或多 key signer，再校验签名清单及包内文件/二进制。发布公钥指纹为 `SHA256:TGJCcbglVkN6Af8yrWYyifxTv+lDNzfXVnQRKeIMl1o`；签名私钥不得随包分发；公钥与指纹是需要公开保留的信任材料，不应当作秘密删除。
 
 
 ### 开发、证书与公开材料的补充边界
